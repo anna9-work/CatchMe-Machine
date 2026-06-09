@@ -4,8 +4,15 @@ import AuditList from "./pages/AuditList"
 import AuditPage from "./pages/AuditPage"
 import AuditHistory from "./pages/AuditHistory"
 import MachineManage from "./pages/MachineManage"
+import MachineAuditDetail from "./pages/MachineAuditDetail"
 
-type Page = "home" | "auditList" | "auditPage" | "history" | "machines"
+type Page =
+  | "home"
+  | "auditList"
+  | "auditPage"
+  | "auditDetail"
+  | "history"
+  | "machines"
 
 function App() {
   const [page, setPage] = useState<Page>("home")
@@ -20,7 +27,20 @@ function App() {
   }
 
   if (page === "auditPage") {
-    return <AuditPage onBack={() => setPage("auditList")} />
+    return (
+      <AuditPage
+        onBack={() => setPage("auditList")}
+        onOpenMachine={() => setPage("auditDetail")}
+      />
+    )
+  }
+
+  if (page === "auditDetail") {
+    return (
+      <MachineAuditDetail
+        onBack={() => setPage("auditPage")}
+      />
+    )
   }
 
   if (page === "history") {

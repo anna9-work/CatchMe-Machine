@@ -1,5 +1,8 @@
+import { useState } from "react"
+
 type Props = {
   onBack: () => void
+  onOpenMachine: () => void
 }
 
 const machines = Array.from({ length: 114 }, (_, i) =>
@@ -15,7 +18,7 @@ const ranges = [
   { label: "101-114", start: 101, end: 114 },
 ]
 
-export default function AuditPage({ onBack }: Props) {
+export default function AuditPage({ onBack, onOpenMachine }: Props) {
   const [activeRange, setActiveRange] = useState(ranges[0])
 
   const visibleMachines = machines.filter((machineNo) => {
@@ -31,9 +34,7 @@ export default function AuditPage({ onBack }: Props) {
 
       <h1 style={{ marginTop: 20 }}>盤點輸入</h1>
 
-      <p style={descStyle}>
-        可一人盤全部，也可多人分段同步盤點
-      </p>
+      <p style={descStyle}>可一人盤全部，也可多人分段同步盤點</p>
 
       <div style={rangeWrapStyle}>
         {ranges.map((range) => {
@@ -57,7 +58,11 @@ export default function AuditPage({ onBack }: Props) {
 
       <div style={listStyle}>
         {visibleMachines.map((machineNo) => (
-          <button key={machineNo} style={machineButtonStyle}>
+          <button
+            key={machineNo}
+            onClick={onOpenMachine}
+            style={machineButtonStyle}
+          >
             機台 {machineNo}
           </button>
         ))}
@@ -65,8 +70,6 @@ export default function AuditPage({ onBack }: Props) {
     </div>
   )
 }
-
-import { useState } from "react"
 
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
