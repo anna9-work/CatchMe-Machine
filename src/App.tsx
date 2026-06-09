@@ -16,12 +16,17 @@ type Page =
 
 function App() {
   const [page, setPage] = useState<Page>("home")
+  const [auditId, setAuditId] = useState<number | null>(null)
+  const [machineNo, setMachineNo] = useState<string>("")
 
   if (page === "auditList") {
     return (
       <AuditList
         onBack={() => setPage("home")}
-        onOpenAudit={() => setPage("auditPage")}
+        onOpenAudit={(id) => {
+          setAuditId(id)
+          setPage("auditPage")
+        }}
       />
     )
   }
@@ -29,8 +34,12 @@ function App() {
   if (page === "auditPage") {
     return (
       <AuditPage
+        auditId={auditId}
         onBack={() => setPage("auditList")}
-        onOpenMachine={() => setPage("auditDetail")}
+        onOpenMachine={(no) => {
+          setMachineNo(no)
+          setPage("auditDetail")
+        }}
       />
     )
   }
@@ -38,6 +47,8 @@ function App() {
   if (page === "auditDetail") {
     return (
       <MachineAuditDetail
+        auditId={auditId}
+        machineNo={machineNo}
         onBack={() => setPage("auditPage")}
       />
     )

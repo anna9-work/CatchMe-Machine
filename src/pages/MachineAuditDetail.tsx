@@ -1,50 +1,121 @@
+import { useEffect, useState } from "react"
+import { supabase } from "../lib/supabase"
+
 type Props = {
+  auditId: number | null
+  machineNo: string
   onBack: () => void
 }
 
-const items = [
-  {
-    product_sku: "a564",
-    product_name: "平口垃圾袋",
-    units_per_box: 150,
-  },
-  {
-    product_sku: "aa0011",
-    product_name: "測試商品A",
-    units_per_box: 100,
-  },
-]
+type AuditItem = {
+  product_sku: string
+  product_name: string
+  units_per_box: number
+  outside_box: number
+  outside_piece: number
+  comment?: string
+}
 
-export default function MachineAuditDetail({ onBack }: Props) {
+type MachineRow = {
+  machine_no: string
+  enabled: boolean
+  items: AuditItem[]
+}
+
+export default function MachineAuditDetail({
+  auditId,
+  machineNo,
+  onBack,
+}: Props) {
+  const [items, setItems] = useState<AuditItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    loadMachineItems()
+  }, [auditId, machineNo])
+
+  async function loadMachineItems() {
+    if (!auditId || !machineNo) return
+
+    try {
+      setLoading(true)
+      setError("")
+
+      const { data, error } = await supabase.rpc("machine_audit_form_v1", {
+        p_group: "catch_0001",
+        p_audit_id: auditId,
+      })
+
+      if (error) {
+        throw error
+      }
+
+      const rows = (data ?? []) as MachineRow[]
+      const machine = rows.find((row) => row.machine_no === machineNo)
+
+      setItems(machine?.items ?? [])
+    } catch (err: any) {
+      console.error(err)
+      setError(err.message ?? "讀取機台商品失敗")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div style={pageStyle}>
       <button onClick={onBack} style={backButtonStyle}>
         ← 返回
       </button>
 
-      <h1 style={{ marginTop: 20 }}>機台 001</h1>
+      <h1 style={{ marginTop: 20 }}>機台 {machineNo}</h1>
 
-      <p style={{ color: "#999" }}>輸入台外盤點箱數與散數</p>
+      <p style={infoStyle}>盤點單 #{auditId ?? "-"}</p>
 
-      <div style={listStyle}>
-        {items.map((item) => (
-          <div key={item.product_sku} style={cardStyle}>
-            <div style={nameStyle}>{item.product_name}</div>
+      {loading && <p style={infoStyle}>載入商品中...</p>}
 
-            <div style={skuStyle}>{item.product_sku}</div>
+      {!loading && error && <p style={errorStyle}>{error}</p>}
 
-            <div style={boxStyle}>箱入數：{item.units_per_box}</div>
+      {!loading && !error && items.length === 0 && (
+        <p style={infoStyle}>這台目前沒有商品</p>
+      )}
 
-            <label style={labelStyle}>盤點箱數</label>
-            <input type="number" inputMode="numeric" style={inputStyle} />
+      {!loading && !error && items.length > 0 && (
+        <>
+          <div style={listStyle}>
+            {items.map((item) => (
+              <div key={item.product_sku} style={cardStyle}>
+                <div style={nameStyle}>{item.product_name}</div>
 
-            <label style={labelStyle}>盤點散數</label>
-            <input type="number" inputMode="numeric" style={inputStyle} />
+                <div style={skuStyle}>{item.product_sku}</div>
+
+                <div style={boxStyle}>箱入數：{item.units_per_box}</div>
+
+                <label style={labelStyle}>盤點箱數</label>
+
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  defaultValue={item.outside_box || ""}
+                  style={inputStyle}
+                />
+
+                <label style={labelStyle}>盤點散數</label>
+
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  defaultValue={item.outside_piece || ""}
+                  style={inputStyle}
+                />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <button style={saveButtonStyle}>儲存</button>
+          <button style={saveButtonStyle}>儲存</button>
+        </>
+      )}
     </div>
   )
 }
@@ -63,6 +134,14 @@ const backButtonStyle: React.CSSProperties = {
   border: "none",
   fontSize: 18,
   padding: 0,
+}
+
+const infoStyle: React.CSSProperties = {
+  color: "#999",
+}
+
+const errorStyle: React.CSSProperties = {
+  color: "#ff6666",
 }
 
 const listStyle: React.CSSProperties = {
