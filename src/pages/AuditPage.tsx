@@ -23,7 +23,8 @@ type Props = {
 
 const GROUP_CODE = "catch_0001"
 
-const GAS_WEBHOOK_URL ="https://script.google.com/macros/s/AKfycbxJCyGURX6TkTUoyU3JpUQLs1DFLDyGk4ZXnwBK2Qh_89Dr_RO07pXHMii335PB3zlKfQ/exec"
+const GAS_WEBHOOK_URL =
+  "https://script.google.com/macros/s/AKfycbxJCyGURX6TkTUoyU3JpUQLs1DFLDyGk4ZXnwBK2Qh_89Dr_RO07pXHMii335PB3zlKfQ/exec"
 
 export default function AuditPage({ auditId, onBack }: Props) {
   const [machines, setMachines] = useState<MachineRow[]>([])
@@ -258,6 +259,7 @@ export default function AuditPage({ auditId, onBack }: Props) {
       setError("")
 
       await saveAll()
+      await saveAll()
 
       const { error } = await supabase.rpc("machine_close_audit_day", {
         p_group: GROUP_CODE,
@@ -311,12 +313,21 @@ export default function AuditPage({ auditId, onBack }: Props) {
       </div>
 
       <div style={metaStyle}>
-        <span>單號 <span style={{ color: "#fff", fontWeight: 600 }}>#{auditId ?? "-"}</span></span>
-        <span style={{ 
-          ...statusBadgeStyle,
-          background: isClosed ? "rgba(234, 179, 8, 0.1)" : "rgba(16, 185, 129, 0.1)",
-          color: isClosed ? "#eab308" : "#10b981" 
-        }}>
+        <span>
+          單號{" "}
+          <span style={{ color: "#fff", fontWeight: 600 }}>
+            #{auditId ?? "-"}
+          </span>
+        </span>
+        <span
+          style={{
+            ...statusBadgeStyle,
+            background: isClosed
+              ? "rgba(234, 179, 8, 0.1)"
+              : "rgba(16, 185, 129, 0.1)",
+            color: isClosed ? "#eab308" : "#10b981",
+          }}
+        >
           {isClosed ? "已關帳" : "進行中"}
         </span>
       </div>
@@ -336,65 +347,63 @@ export default function AuditPage({ auditId, onBack }: Props) {
             <div style={itemListStyle}>
               {machine.items.map((item) => (
                 <div key={item.product_sku} style={itemCardStyle}>
-                  <div style={itemInfoStyle}>
-                    <div style={productNameStyle}>{item.product_name}</div>
-                    <div style={skuWrapperStyle}>
-                      <span style={skuStyle}>{item.product_sku}</span>
-                      <span style={boxStyle}>箱入數 {item.units_per_box}</span>
+                  <div style={productNameStyle}>{item.product_name}</div>
+
+                  <div style={actionRowStyle}>
+                    <span style={skuStyle}>{item.product_sku}</span>
+
+                    <div style={inputsWrapperStyle}>
+                      <div style={inputGroupStyle}>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          disabled={isClosed}
+                          value={item.outside_box || ""}
+                          onChange={(e) =>
+                            updateValue(
+                              machine.machine_no,
+                              item.product_sku,
+                              "outside_box",
+                              e.target.value
+                            )
+                          }
+                          onBlur={() => saveOne(machine.machine_no, item.product_sku)}
+                          style={{
+                            ...inputStyle,
+                            opacity: isClosed ? 0.6 : 1,
+                          }}
+                        />
+                        <span style={unitLabelStyle}>箱</span>
+                      </div>
+
+                      <div style={inputGroupStyle}>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          disabled={isClosed}
+                          value={item.outside_piece || ""}
+                          onChange={(e) =>
+                            updateValue(
+                              machine.machine_no,
+                              item.product_sku,
+                              "outside_piece",
+                              e.target.value
+                            )
+                          }
+                          onBlur={() => saveOne(machine.machine_no, item.product_sku)}
+                          style={{
+                            ...inputStyle,
+                            opacity: isClosed ? 0.6 : 1,
+                          }}
+                        />
+                        <span style={unitLabelStyle}>散</span>
+                      </div>
                     </div>
                   </div>
 
-                  <div style={inputsContainerStyle}>
-                    <div style={inputGroupStyle}>
-                      <span style={unitLabelStyle}>箱</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        disabled={isClosed}
-                        value={item.outside_box || ""}
-                        onChange={(e) =>
-                          updateValue(
-                            machine.machine_no,
-                            item.product_sku,
-                            "outside_box",
-                            e.target.value
-                          )
-                        }
-                        onBlur={() => saveOne(machine.machine_no, item.product_sku)}
-                        style={{
-                          ...inputStyle,
-                          opacity: isClosed ? 0.6 : 1,
-                        }}
-                      />
-                    </div>
-
-                    <div style={inputDividerStyle} />
-
-                    <div style={inputGroupStyle}>
-                      <span style={unitLabelStyle}>散</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        disabled={isClosed}
-                        value={item.outside_piece || ""}
-                        onChange={(e) =>
-                          updateValue(
-                            machine.machine_no,
-                            item.product_sku,
-                            "outside_piece",
-                            e.target.value
-                          )
-                        }
-                        onBlur={() => saveOne(machine.machine_no, item.product_sku)}
-                        style={{
-                          ...inputStyle,
-                          opacity: isClosed ? 0.6 : 1,
-                        }}
-                      />
-                    </div>
-                  </div>
+                  <div style={boxInfoStyle}>箱入數 {item.units_per_box}</div>
                 </div>
               ))}
             </div>
@@ -402,11 +411,7 @@ export default function AuditPage({ auditId, onBack }: Props) {
         ))}
 
       {!loading && !error && !isClosed && (
-        <button
-          onClick={closeAudit}
-          disabled={closing}
-          style={closeButtonStyle}
-        >
+        <button onClick={closeAudit} disabled={closing} style={closeButtonStyle}>
           {closing ? "處理中..." : "完成並關帳"}
         </button>
       )}
@@ -422,51 +427,60 @@ export default function AuditPage({ auditId, onBack }: Props) {
 
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
-  background: "#09090b", // 深邃質感的背景色 (Zinc 900)
+  background: "#09090b",
   color: "#fafafa",
-  // 針對手機的上下留白，保留瀏海與底線空間
-  padding: "24px 16px 60px",
+  padding: "0 16px 60px",
   boxSizing: "border-box",
   fontFamily: "system-ui, -apple-system, sans-serif",
 }
 
 const topBarStyle: CSSProperties = {
-  height: 56,
+  position: "sticky",
+  top: 0,
+  zIndex: 100,
+  background: "#09090b",
+  paddingTop: "max(12px, env(safe-area-inset-top))",
+  paddingBottom: 8,
+  margin: "0 -16px 4px",
+  paddingLeft: 16,
+  paddingRight: 16,
   display: "grid",
   gridTemplateColumns: "48px 1fr 48px",
   alignItems: "center",
-  marginBottom: 12,
+  borderBottom: "1px solid #18181b",
 }
 
 const iconButtonStyle: CSSProperties = {
   background: "transparent",
   border: "none",
   color: "#a1a1aa",
-  fontSize: 40, // 放大返回鍵熱區
+  fontSize: 32,
   lineHeight: 1,
   padding: 0,
   cursor: "pointer",
   display: "flex",
   alignItems: "center",
   justifyContent: "flex-start",
+  minHeight: 44,
 }
 
 const saveIconStyle: CSSProperties = {
   background: "transparent",
   border: "none",
   color: "#10b981",
-  fontSize: 26, // 放大儲存鍵熱區
+  fontSize: 22,
   fontWeight: 600,
   padding: 0,
   cursor: "pointer",
   display: "flex",
   alignItems: "center",
   justifyContent: "flex-end",
+  minHeight: 44,
 }
 
 const titleStyle: CSSProperties = {
   textAlign: "center",
-  fontSize: 18,
+  fontSize: 17,
   fontWeight: 600,
   letterSpacing: "0.5px",
 }
@@ -476,16 +490,16 @@ const metaStyle: CSSProperties = {
   justifyContent: "space-between",
   alignItems: "center",
   color: "#a1a1aa",
-  fontSize: 15,
-  padding: "12px 4px",
+  fontSize: 14,
+  padding: "4px 4px 12px",
   borderBottom: "1px solid #27272a",
-  marginBottom: 20,
+  marginBottom: 16,
 }
 
 const statusBadgeStyle: CSSProperties = {
-  padding: "6px 12px",
+  padding: "5px 10px",
   borderRadius: 16,
-  fontSize: 13,
+  fontSize: 12,
   fontWeight: 600,
   letterSpacing: "0.5px",
 }
@@ -493,11 +507,11 @@ const statusBadgeStyle: CSSProperties = {
 const messageStyle: CSSProperties = {
   background: "rgba(16, 185, 129, 0.1)",
   color: "#10b981",
-  padding: "14px 16px",
+  padding: "12px 14px",
   borderRadius: 12,
-  fontSize: 15,
+  fontSize: 14,
   fontWeight: 500,
-  marginBottom: 20,
+  marginBottom: 14,
   textAlign: "center",
   border: "1px solid rgba(16, 185, 129, 0.2)",
 }
@@ -512,33 +526,33 @@ const mutedStyle: CSSProperties = {
 const errorStyle: CSSProperties = {
   background: "rgba(239, 68, 68, 0.1)",
   color: "#ef4444",
-  padding: "14px 16px",
+  padding: "12px 14px",
   borderRadius: 12,
-  fontSize: 15,
-  marginBottom: 20,
+  fontSize: 14,
+  marginBottom: 14,
   textAlign: "center",
   border: "1px solid rgba(239, 68, 68, 0.2)",
 }
 
 const machineCardStyle: CSSProperties = {
-  background: "#18181b", 
-  border: "1px solid #27272a", 
-  borderRadius: 20, // 增加手機版的圓角潤飾感
-  padding: "20px 16px",
-  marginBottom: 20,
-  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
+  background: "#18181b",
+  border: "1px solid #27272a",
+  borderRadius: 16,
+  padding: "14px 12px",
+  marginBottom: 16,
+  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.18)",
 }
 
 const machineHeaderStyle: CSSProperties = {
   borderBottom: "1px solid #27272a",
-  paddingBottom: 14,
-  marginBottom: 16,
+  paddingBottom: 10,
+  marginBottom: 12,
 }
 
 const machineTitleStyle: CSSProperties = {
   margin: 0,
   color: "#fafafa",
-  fontSize: 18, // 手機上看標題大一點更清晰
+  fontSize: 17,
   fontWeight: 600,
   letterSpacing: "0.5px",
 }
@@ -546,112 +560,94 @@ const machineTitleStyle: CSSProperties = {
 const itemListStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 16, // 商品間距加大，防誤觸
+  gap: 12,
 }
 
 const itemCardStyle: CSSProperties = {
   display: "flex",
-  flexDirection: "column", // 手機版改為垂直佈局
-  gap: 12,
-  paddingBottom: 16,
+  flexDirection: "column",
+  gap: 8,
+  paddingBottom: 12,
   borderBottom: "1px dashed #27272a",
 }
 
-const itemInfoStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-}
-
 const productNameStyle: CSSProperties = {
-  fontSize: 16, // 放大品名字體
+  fontSize: 16,
   fontWeight: 500,
-  lineHeight: 1.4,
+  lineHeight: 1.3,
   color: "#e4e4e7",
 }
 
-const skuWrapperStyle: CSSProperties = {
+const actionRowStyle: CSSProperties = {
   display: "flex",
+  justifyContent: "space-between",
   alignItems: "center",
   gap: 10,
 }
 
 const skuStyle: CSSProperties = {
-  fontSize: 13,
-  color: "#a1a1aa",
-  background: "#27272a",
-  padding: "4px 8px",
-  borderRadius: 6,
+  minWidth: 0,
+  flex: 1,
+  fontSize: 12,
+  color: "#71717a",
   fontFamily: "monospace",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 }
 
-const boxStyle: CSSProperties = {
-  color: "#60a5fa",
-  fontSize: 13,
-  fontWeight: 500,
-}
-
-// 獨立的輸入區塊（帶微弱背景色）
-const inputsContainerStyle: CSSProperties = {
+const inputsWrapperStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  justifyContent: "space-between",
-  background: "#131316", // 區分出輸入熱區
-  border: "1px solid #27272a",
-  borderRadius: 14,
-  padding: "8px 12px",
+  gap: 12,
+  flexShrink: 0,
 }
 
 const inputGroupStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  flex: 1,
-  justifyContent: "center",
-  gap: 8,
-}
-
-const inputDividerStyle: CSSProperties = {
-  width: 1,
-  height: 32,
-  background: "#27272a",
-  margin: "0 12px",
-}
-
-const unitLabelStyle: CSSProperties = {
-  color: "#71717a",
-  fontSize: 15,
-  fontWeight: 500,
+  gap: 4,
 }
 
 const inputStyle: CSSProperties = {
-  width: "100%", 
-  maxWidth: 80, // 不會無限變寬，保持比例
-  height: 48, // 標準手機觸控高度
-  borderRadius: 10,
+  width: 48,
+  height: 36,
+  borderRadius: 8,
   border: "1px solid #3f3f46",
-  background: "#09090b",
+  background: "#131316",
   color: "#fafafa",
-  fontSize: 18, // 放大輸入數字
+  fontSize: 16,
   fontWeight: 600,
   textAlign: "center",
-  transition: "border-color 0.2s",
   outline: "none",
   padding: 0,
 }
 
+const unitLabelStyle: CSSProperties = {
+  color: "#71717a",
+  fontSize: 14,
+  fontWeight: 500,
+}
+
+const boxInfoStyle: CSSProperties = {
+  color: "#60a5fa",
+  fontSize: 12,
+  marginTop: -4,
+}
+
 const closeButtonStyle: CSSProperties = {
   width: "100%",
-  height: 56, // 放大主按鈕觸控高度
+  height: 52,
   borderRadius: 14,
   border: "none",
-  background: "#fafafa", 
+  background: "#fafafa",
   color: "#09090b",
-  fontSize: 17,
+  fontSize: 16,
   fontWeight: 600,
-  marginTop: 28,
+  marginTop: 24,
   cursor: "pointer",
   transition: "opacity 0.2s",
-  boxShadow: "0 4px 12px rgba(250, 250, 250, 0.15)", // 增加按鈕立體感
+  boxShadow: "0 4px 12px rgba(250, 250, 250, 0.15)",
 }
 
 const closedBoxStyle: CSSProperties = {
@@ -662,5 +658,5 @@ const closedBoxStyle: CSSProperties = {
   padding: "18px",
   border: "1px dashed #3f3f46",
   borderRadius: 14,
-  marginTop: 28,
+  marginTop: 24,
 }
