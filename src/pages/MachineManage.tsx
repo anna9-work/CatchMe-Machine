@@ -149,14 +149,12 @@ export default function MachineManage({
     <div style={pageStyle}>
       <div style={topBarStyle}>
         <button onClick={onBack} style={backButtonStyle}>
-          ←
+          ‹
         </button>
 
-        <div>
+        <div style={titleBlockStyle}>
           <h1 style={titleStyle}>機台管理</h1>
-          <div style={subTitleStyle}>
-            {machines.length} 台機台
-          </div>
+          <div style={subTitleStyle}>{machines.length} 台機台</div>
         </div>
 
         <button onClick={loadData} style={refreshButtonStyle}>
@@ -182,32 +180,28 @@ export default function MachineManage({
                 onClick={() => onOpenMachine(machine.machine_no)}
               >
                 <div style={machineHeaderStyle}>
-                  <div style={machineNoStyle}>
-                    #{machine.machine_no}
-                  </div>
+                  <div style={machineNoStyle}>#{machine.machine_no}</div>
 
-                  <div style={countStyle}>
-                    {machineItems.length} 項
-                  </div>
+                  <div style={countStyle}>{machineItems.length} 項</div>
                 </div>
 
-                {previewItems.map((item) => (
-                  <div key={item.id} style={previewRowStyle}>
-                    <div style={previewNameStyle}>
-                      {item.product_name || item.product_sku}
-                    </div>
+                <div style={previewListStyle}>
+                  {previewItems.map((item) => (
+                    <div key={item.id} style={previewRowStyle}>
+                      <div style={previewNameStyle}>
+                        {item.product_name || item.product_sku}
+                      </div>
 
-                    <div style={previewQtyStyle}>
-                      {item.qty_piece}
+                      <div style={previewQtyStyle}>{item.qty_piece}</div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
-                {remainCount > 0 && (
-                  <div style={moreStyle}>
-                    +{remainCount}
-                  </div>
-                )}
+                  {previewItems.length === 0 && (
+                    <div style={emptyPreviewStyle}>尚無商品</div>
+                  )}
+                </div>
+
+                {remainCount > 0 && <div style={moreStyle}>+{remainCount}</div>}
               </div>
             )
           })}
@@ -216,11 +210,12 @@ export default function MachineManage({
             <button
               onClick={addNextMachine}
               disabled={saving}
-              style={bottomAddButtonStyle}
+              style={{
+                ...bottomAddButtonStyle,
+                opacity: saving ? 0.7 : 1,
+              }}
             >
-              {saving
-                ? "新增中..."
-                : `＋ 新增機台 ${nextMachineNo}`}
+              {saving ? "新增中..." : `＋ 新增機台 ${nextMachineNo}`}
             </button>
           </div>
         </div>
@@ -233,126 +228,197 @@ const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background: "#050913",
   color: "#fff",
-  padding: "44px 16px 28px",
+  padding: "0 16px 32px",
   boxSizing: "border-box",
+  fontFamily: "system-ui, -apple-system, sans-serif",
 }
 
 const topBarStyle: CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 100,
+  background: "#050913",
+  paddingTop: "max(12px, env(safe-area-inset-top))",
+  paddingBottom: 8,
+  margin: "0 -16px 12px",
+  paddingLeft: 16,
+  paddingRight: 16,
   display: "grid",
   gridTemplateColumns: "48px 1fr 48px",
   alignItems: "center",
-  marginBottom: 20,
+  borderBottom: "1px solid #111827",
 }
 
 const backButtonStyle: CSSProperties = {
   background: "transparent",
   border: "none",
-  color: "#fff",
-  fontSize: 34,
+  color: "#d1d5db",
+  fontSize: 32,
+  lineHeight: 1,
+  padding: 0,
+  minHeight: 44,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-start",
 }
 
 const refreshButtonStyle: CSSProperties = {
   background: "transparent",
   border: "none",
-  color: "#fff",
-  fontSize: 28,
+  color: "#d1d5db",
+  fontSize: 24,
+  lineHeight: 1,
+  padding: 0,
+  minHeight: 44,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+}
+
+const titleBlockStyle: CSSProperties = {
+  textAlign: "center",
 }
 
 const titleStyle: CSSProperties = {
   margin: 0,
-  fontSize: 30,
-  fontWeight: 900,
+  fontSize: 18,
+  fontWeight: 800,
+  letterSpacing: "0.5px",
 }
 
 const subTitleStyle: CSSProperties = {
-  color: "#999",
-  marginTop: 4,
+  color: "#9ca3af",
+  marginTop: 2,
+  fontSize: 12,
 }
 
 const messageStyle: CSSProperties = {
+  background: "rgba(47, 214, 111, 0.1)",
   color: "#2fd66f",
+  border: "1px solid rgba(47, 214, 111, 0.2)",
+  borderRadius: 12,
+  padding: "10px 12px",
   marginBottom: 12,
+  fontSize: 14,
+  textAlign: "center",
 }
 
 const errorStyle: CSSProperties = {
+  background: "rgba(255, 102, 102, 0.1)",
   color: "#ff6666",
+  border: "1px solid rgba(255, 102, 102, 0.2)",
+  borderRadius: 12,
+  padding: "10px 12px",
   marginBottom: 12,
+  fontSize: 14,
+  textAlign: "center",
 }
 
 const mutedStyle: CSSProperties = {
-  color: "#999",
+  color: "#9ca3af",
+  textAlign: "center",
+  padding: "20px 0",
+  margin: 0,
 }
 
 const listStyle: CSSProperties = {
   display: "grid",
-  gap: 16,
+  gap: 12,
 }
 
 const machineCardStyle: CSSProperties = {
   background: "#101827",
   border: "1px solid #273244",
-  borderRadius: 24,
-  padding: 16,
+  borderRadius: 18,
+  padding: "14px 14px 12px",
   cursor: "pointer",
+  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.18)",
 }
 
 const machineHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  marginBottom: 12,
+  marginBottom: 10,
 }
 
 const machineNoStyle: CSSProperties = {
   color: "#2fd66f",
-  fontSize: 28,
+  fontSize: 24,
   fontWeight: 900,
+  lineHeight: 1,
 }
 
 const countStyle: CSSProperties = {
-  color: "#aaa",
-  fontSize: 16,
+  color: "#9ca3af",
+  fontSize: 13,
+  background: "rgba(255, 255, 255, 0.06)",
+  padding: "4px 9px",
+  borderRadius: 999,
+}
+
+const previewListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
 }
 
 const previewRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  marginTop: 8,
+  alignItems: "center",
+  gap: 12,
 }
 
 const previewNameStyle: CSSProperties = {
-  color: "#ddd",
+  color: "#d1d5db",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  maxWidth: "75%",
+  minWidth: 0,
+  flex: 1,
+  fontSize: 14,
 }
 
 const previewQtyStyle: CSSProperties = {
   color: "#fff",
-  fontWeight: 700,
+  fontWeight: 800,
+  fontSize: 15,
+  flexShrink: 0,
+  minWidth: 32,
+  textAlign: "right",
+}
+
+const emptyPreviewStyle: CSSProperties = {
+  color: "#6b7280",
+  fontSize: 13,
 }
 
 const moreStyle: CSSProperties = {
-  marginTop: 10,
+  marginTop: 8,
   textAlign: "center",
-  color: "#999",
+  color: "#9ca3af",
+  fontSize: 13,
 }
 
 const addMachineCardStyle: CSSProperties = {
   background: "#101827",
   border: "1px dashed #3b82f6",
-  borderRadius: 24,
-  padding: 16,
+  borderRadius: 18,
+  padding: 12,
+  marginTop: 4,
 }
 
 const bottomAddButtonStyle: CSSProperties = {
   width: "100%",
-  height: 56,
-  borderRadius: 16,
+  height: 50,
+  borderRadius: 14,
   border: "none",
   background: "#2563eb",
   color: "#fff",
-  fontSize: 18,
+  fontSize: 16,
   fontWeight: 800,
+  cursor: "pointer",
 }
