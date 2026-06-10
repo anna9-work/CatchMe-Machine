@@ -1,57 +1,65 @@
 import { useState } from "react"
+
 import Home from "./pages/Home"
-import AuditList from "./pages/AuditList"
 import AuditPage from "./pages/AuditPage"
 import AuditHistory from "./pages/AuditHistory"
 import MachineManage from "./pages/MachineManage"
-import MachineAuditDetail from "./pages/MachineAuditDetail"
+import MachineDetail from "./pages/MachineDetail"
+import { supabase } from "./lib/supabase"
 
-type Page =
-  | "home"
-  | "auditList"
-  | "auditPage"
-  | "auditDetail"
-  | "history"
-  | "machines"
+type Page = "home" | "audit" | "history" | "machines" | "machineDetail"
+
+const GROUP_CODE = "catch_0001"
 
 function App() {
   const [page, setPage] = useState<Page>("home")
   const [auditId, setAuditId] = useState<number | null>(null)
-  const [machineNo, setMachineNo] = useState<string>("")
+  const [selectedMachineNo, setSelectedMachineNo] = useState("")
+  const [loadingAudit, setLoadingAudit] = useState(false)
+  const [error, setError] = useState("")
 
-  if (page === "auditList") {
+  async function openTodayAudit() {
+    try {
+      setLoadingAudit(true)
+      setError("")
+
+      const { data, error } = await supabase.rpc(
+        "machine_create_or_get_today_audit",
+        {
+          p_group: GROUP_CODE,
+        }
+      )
+
+      if (error) throw error
+
+      setAuditId(Number(data))
+      setPage("audit")
+    } catch (err: any) {
+      console.error(err)
+      setError(err.message ?? "取得今日盤點單失敗")
+    } finally {
+      setLoadingAudit(false)
+    }
+  }
+
+  if (loadingAudit) {
     return (
-      <AuditList
-        onBack={() => setPage("home")}
-        onOpenAudit={(id) => {
-          setAuditId(id)
-          setPage("auditPage")
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#050913",
+          color: "#fff",
+          padding: 24,
+          boxSizing: "border-box",
         }}
-      />
+      >
+        載入今日盤點單...
+      </div>
     )
   }
 
-  if (page === "auditPage") {
-    return (
-      <AuditPage
-        auditId={auditId}
-        onBack={() => setPage("auditList")}
-        onOpenMachine={(no) => {
-          setMachineNo(no)
-          setPage("auditDetail")
-        }}
-      />
-    )
-  }
-
-  if (page === "auditDetail") {
-    return (
-      <MachineAuditDetail
-        auditId={auditId}
-        machineNo={machineNo}
-        onBack={() => setPage("auditPage")}
-      />
-    )
+  if (page === "audit") {
+    return <AuditPage auditId={auditId} onBack={() => setPage("home")} />
   }
 
   if (page === "history") {
@@ -59,15 +67,47 @@ function App() {
   }
 
   if (page === "machines") {
-    return <MachineManage onBack={() => setPage("home")} />
+    return (
+      <MachineManage
+        onBack={() => setPage("home")}
+        onOpenMachine={(machineNo) => {
+          setSelectedMachineNo(machineNo)
+          setPage("machineDetail")
+        }}
+      />
+    )
+  }
+
+  if (page === "machineDetail") {
+    return (
+      <MachineDetail
+        machineNo={selectedMachineNo}
+        onBack={() => setPage("machines")}
+      />
+    )
   }
 
   return (
-    <Home
-      onAuditClick={() => setPage("auditList")}
-      onHistoryClick={() => setPage("history")}
-      onMachineClick={() => setPage("machines")}
-    />
+    <>
+      {error && (
+        <div
+          style={{
+            background: "#2a0f14",
+            color: "#ff9999",
+            padding: 12,
+            fontSize: 15,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <Home
+        onAuditClick={openTodayAudit}
+        onHistoryClick={() => setPage("history")}
+        onMachineClick={() => setPage("machines")}
+      />
+    </>
   )
 }
 

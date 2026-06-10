@@ -23,6 +23,8 @@ type Props = {
 
 const GROUP_CODE = "catch_0001"
 
+const GAS_WEBHOOK_URL ="https://script.google.com/macros/s/AKfycbxJCyGURX6TkTUoyU3JpUQLs1DFLDyGk4ZXnwBK2Qh_89Dr_RO07pXHMii335PB3zlKfQ/exec"
+
 export default function AuditPage({ auditId, onBack }: Props) {
   const [machines, setMachines] = useState<MachineRow[]>([])
   const [bizDate, setBizDate] = useState("")
@@ -265,9 +267,27 @@ export default function AuditPage({ auditId, onBack }: Props) {
       if (error) throw error
 
       setIsClosed(true)
-      setDirtyKeys(new Set())
-      setMessage("已關帳")
-      await loadData(true)
+setDirtyKeys(new Set())
+
+try {
+  await fetch(GAS_WEBHOOK_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      groupCode: GROUP_CODE,
+      bizDate,
+    }),
+  })
+
+  setMessage("已關帳，已匯入試算表")
+} catch {
+  setMessage("已關帳")
+}
+
+await loadData(true)
     } catch (err: any) {
       console.error(err)
       setError(err.message ?? "關帳失敗")
