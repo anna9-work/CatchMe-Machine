@@ -17,6 +17,7 @@ type MachineItem = {
 type Product = {
   product_sku: string
   product_name: string
+  barcode?: string
 }
 
 const GROUP_CODE = "catch_0001"
@@ -29,6 +30,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [newQty, setNewQty] = useState("")
   const [loading, setLoading] = useState(true)
+  const [searching, setSearching] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -38,8 +40,22 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
   }, [machineNo])
 
   useEffect(() => {
-    if (showAdd) loadProducts()
-  }, [showAdd])
+    if (!showAdd) return
+
+    const keyword = searchText.trim()
+
+    if (!keyword) {
+      setProducts([])
+      setSelectedProduct(null)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      searchProducts(keyword)
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [searchText, showAdd])
 
   async function loadItems() {
     try {
@@ -94,20 +110,83 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
     }
   }
 
-  async function loadProducts() {
-    const { data, error } = await supabase
-      .from("products")
-      .select("product_sku,product_name")
-      .eq("enabled", true)
-      .order("product_sku", { ascending: true })
-      .limit(300)
+  async function searchProducts(keyword: string) {
+    try {
+      setSearching(true)
+      setError("")
 
-    if (error) {
-      setError(error.message)
-      return
+      const normalizedKeyword = keyword.trim()
+
+      const { data: productData, error: productError } = await supabase
+        .from("products")
+        .select("product_sku,product_name")
+        .eq("enabled", true)
+        .or(
+          `product_sku.ilike.%${normalizedKeyword}%,product_name.ilike.%${normalizedKeyword}%`
+        )
+        .limit(30)
+
+      if (productError) throw productError
+
+      const { data: barcodeData, error: barcodeError } = await supabase
+        .from("product_barcodes")
+        .select("product_sku,barcode")
+        .eq("enabled", true)
+        .ilike("barcode", `%${normalizedKeyword}%`)
+        .limit(30)
+
+      if (barcodeError) throw barcodeError
+
+      const skuFromBarcode = Array.from(
+        new Set((barcodeData ?? []).map((row) => row.product_sku))
+      )
+
+      let barcodeProductData: Array<{
+        product_sku: string
+        product_name: string
+      }> = []
+
+      if (skuFromBarcode.length > 0) {
+        const { data, error } = await supabase
+          .from("products")
+          .select("product_sku,product_name")
+          .eq("enabled", true)
+          .in("product_sku", skuFromBarcode)
+
+        if (error) throw error
+
+        barcodeProductData = data ?? []
+      }
+
+      const barcodeMap = new Map(
+        (barcodeData ?? []).map((row) => [row.product_sku, row.barcode])
+      )
+
+      const merged = new Map<string, Product>()
+
+      for (const product of productData ?? []) {
+        merged.set(product.product_sku, {
+          product_sku: product.product_sku,
+          product_name: product.product_name ?? "",
+          barcode: barcodeMap.get(product.product_sku),
+        })
+      }
+
+      for (const product of barcodeProductData) {
+        merged.set(product.product_sku, {
+          product_sku: product.product_sku,
+          product_name: product.product_name ?? "",
+          barcode: barcodeMap.get(product.product_sku),
+        })
+      }
+
+      setProducts(Array.from(merged.values()).slice(0, 30))
+    } catch (err: any) {
+      console.error(err)
+      setError(err.message ?? "搜尋失敗")
+    } finally {
+      setSearching(false)
     }
-
-    setProducts((data ?? []) as Product[])
   }
 
   function toSafeNumber(value: string) {
@@ -210,6 +289,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
       setSearchText("")
       setSelectedProduct(null)
       setNewQty("")
+      setProducts([])
       setMessage("已加入商品")
 
       await loadItems()
@@ -221,18 +301,6 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
     }
   }
 
-  const filteredProducts = products
-    .filter((product) => {
-      const keyword = searchText.trim().toLowerCase()
-      if (!keyword) return true
-
-      return (
-        product.product_sku.toLowerCase().includes(keyword) ||
-        product.product_name.toLowerCase().includes(keyword)
-      )
-    })
-    .slice(0, 30)
-
   return (
     <div style={pageStyle}>
       <div style={topBarStyle}>
@@ -242,18 +310,12 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
 
         <h1 style={titleStyle}>機台 #{machineNo}</h1>
 
-        <button
-          onClick={() => setMessage("已儲存")}
-          style={saveButtonStyle}
-        >
+        <button onClick={() => setMessage("已儲存")} style={saveButtonStyle}>
           儲存
         </button>
       </div>
 
-      <button
-        onClick={() => setShowAdd(true)}
-        style={addProductButtonStyle}
-      >
+      <button onClick={() => setShowAdd(true)} style={addProductButtonStyle}>
         ＋ 加入商品
       </button>
 
@@ -269,10 +331,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
         <div style={listStyle}>
           {items.map((item) => (
             <div key={item.id} style={cardStyle}>
-              <button
-                onClick={() => deleteItem(item)}
-                style={deleteButtonStyle}
-              >
+              <button onClick={() => deleteItem(item)} style={deleteButtonStyle}>
                 ×
               </button>
 
@@ -313,20 +372,29 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
                 setSearchText(e.target.value)
                 setSelectedProduct(null)
               }}
-              placeholder="搜尋 SKU / 品名"
+              placeholder="搜尋貨編 / 名稱 / 條碼"
               style={searchInputStyle}
+              autoFocus
             />
+
+            {searching && <div style={mutedStyle}>搜尋中...</div>}
 
             {selectedProduct && (
               <div style={selectedBoxStyle}>
                 已選：{selectedProduct.product_sku}
                 <br />
                 {selectedProduct.product_name}
+                {selectedProduct.barcode && (
+                  <>
+                    <br />
+                    條碼：{selectedProduct.barcode}
+                  </>
+                )}
               </div>
             )}
 
             <div style={productListStyle}>
-              {filteredProducts.map((product) => (
+              {products.map((product) => (
                 <button
                   key={product.product_sku}
                   onClick={() => setSelectedProduct(product)}
@@ -341,8 +409,18 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
                   <strong>{product.product_sku}</strong>
                   <br />
                   {product.product_name}
+                  {product.barcode && (
+                    <>
+                      <br />
+                      <span style={barcodeStyle}>條碼：{product.barcode}</span>
+                    </>
+                  )}
                 </button>
               ))}
+
+              {searchText.trim() && !searching && products.length === 0 && (
+                <div style={emptyBoxStyle}>找不到商品</div>
+              )}
             </div>
 
             <input
@@ -362,6 +440,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
                   setSearchText("")
                   setSelectedProduct(null)
                   setNewQty("")
+                  setProducts([])
                 }}
                 style={cancelButtonStyle}
               >
@@ -387,7 +466,7 @@ const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background: "#050913",
   color: "#fff",
-  padding: "44px 16px 28px",
+  padding: "20px 16px 28px",
   boxSizing: "border-box",
 }
 
@@ -575,6 +654,10 @@ const productButtonStyle: CSSProperties = {
   padding: 12,
   fontSize: 16,
   lineHeight: 1.5,
+}
+
+const barcodeStyle: CSSProperties = {
+  color: "#aaa",
 }
 
 const modalActionsStyle: CSSProperties = {
