@@ -267,27 +267,27 @@ export default function AuditPage({ auditId, onBack }: Props) {
       if (error) throw error
 
       setIsClosed(true)
-setDirtyKeys(new Set())
+      setDirtyKeys(new Set())
 
-try {
-  await fetch(GAS_WEBHOOK_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      groupCode: GROUP_CODE,
-      bizDate,
-    }),
-  })
+      try {
+        await fetch(GAS_WEBHOOK_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            groupCode: GROUP_CODE,
+            bizDate,
+          }),
+        })
 
-  setMessage("已關帳，已匯入試算表")
-} catch {
-  setMessage("已關帳")
-}
+        setMessage("已關帳，已匯入試算表")
+      } catch {
+        setMessage("已關帳")
+      }
 
-await loadData(true)
+      await loadData(true)
     } catch (err: any) {
       console.error(err)
       setError(err.message ?? "關帳失敗")
@@ -311,9 +311,13 @@ await loadData(true)
       </div>
 
       <div style={metaStyle}>
-        <span>盤點單：#{auditId ?? "-"}</span>
-        <span style={{ color: isClosed ? "#ffcc66" : "#2fd66f" }}>
-          {isClosed ? "已關帳" : "未關帳"}
+        <span>單號 <span style={{ color: "#fff", fontWeight: 600 }}>#{auditId ?? "-"}</span></span>
+        <span style={{ 
+          ...statusBadgeStyle,
+          background: isClosed ? "rgba(234, 179, 8, 0.1)" : "rgba(16, 185, 129, 0.1)",
+          color: isClosed ? "#eab308" : "#10b981" 
+        }}>
+          {isClosed ? "已關帳" : "進行中"}
         </span>
       </div>
 
@@ -325,61 +329,71 @@ await loadData(true)
         !error &&
         machines.map((machine) => (
           <section key={machine.machine_no} style={machineCardStyle}>
-            <h2 style={machineTitleStyle}>#{machine.machine_no}</h2>
+            <div style={machineHeaderStyle}>
+              <h2 style={machineTitleStyle}>機台 #{machine.machine_no}</h2>
+            </div>
 
             <div style={itemListStyle}>
               {machine.items.map((item) => (
                 <div key={item.product_sku} style={itemCardStyle}>
                   <div style={itemInfoStyle}>
                     <div style={productNameStyle}>{item.product_name}</div>
-                    <div style={skuStyle}>{item.product_sku}</div>
-                    <div style={boxStyle}>箱入數：{item.units_per_box}</div>
+                    <div style={skuWrapperStyle}>
+                      <span style={skuStyle}>{item.product_sku}</span>
+                      <span style={boxStyle}>箱入數 {item.units_per_box}</span>
+                    </div>
                   </div>
 
-                  <div style={inputsRowStyle}>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      disabled={isClosed}
-                      value={item.outside_box || ""}
-                      onChange={(e) =>
-                        updateValue(
-                          machine.machine_no,
-                          item.product_sku,
-                          "outside_box",
-                          e.target.value
-                        )
-                      }
-                      onBlur={() => saveOne(machine.machine_no, item.product_sku)}
-                      style={{
-                        ...inputStyle,
-                        opacity: isClosed ? 0.6 : 1,
-                      }}
-                    />
-                    <span style={unitStyle}>箱</span>
+                  <div style={inputsContainerStyle}>
+                    <div style={inputGroupStyle}>
+                      <span style={unitLabelStyle}>箱</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        disabled={isClosed}
+                        value={item.outside_box || ""}
+                        onChange={(e) =>
+                          updateValue(
+                            machine.machine_no,
+                            item.product_sku,
+                            "outside_box",
+                            e.target.value
+                          )
+                        }
+                        onBlur={() => saveOne(machine.machine_no, item.product_sku)}
+                        style={{
+                          ...inputStyle,
+                          opacity: isClosed ? 0.6 : 1,
+                        }}
+                      />
+                    </div>
 
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      disabled={isClosed}
-                      value={item.outside_piece || ""}
-                      onChange={(e) =>
-                        updateValue(
-                          machine.machine_no,
-                          item.product_sku,
-                          "outside_piece",
-                          e.target.value
-                        )
-                      }
-                      onBlur={() => saveOne(machine.machine_no, item.product_sku)}
-                      style={{
-                        ...inputStyle,
-                        opacity: isClosed ? 0.6 : 1,
-                      }}
-                    />
-                    <span style={unitStyle}>散</span>
+                    <div style={inputDividerStyle} />
+
+                    <div style={inputGroupStyle}>
+                      <span style={unitLabelStyle}>散</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        disabled={isClosed}
+                        value={item.outside_piece || ""}
+                        onChange={(e) =>
+                          updateValue(
+                            machine.machine_no,
+                            item.product_sku,
+                            "outside_piece",
+                            e.target.value
+                          )
+                        }
+                        onBlur={() => saveOne(machine.machine_no, item.product_sku)}
+                        style={{
+                          ...inputStyle,
+                          opacity: isClosed ? 0.6 : 1,
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -393,23 +407,27 @@ await loadData(true)
           disabled={closing}
           style={closeButtonStyle}
         >
-          {closing ? "關帳中..." : "關帳"}
+          {closing ? "處理中..." : "完成並關帳"}
         </button>
       )}
 
       {!loading && !error && isClosed && (
-        <div style={closedBoxStyle}>此盤點單已關帳</div>
+        <div style={closedBoxStyle}>此盤點單已確認並關帳</div>
       )}
     </div>
   )
 }
 
+/* ---------------- 針對手機優化的 CSS Properties ---------------- */
+
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
-  background: "#050913",
-  color: "#fff",
-  padding: "44px 14px 28px",
+  background: "#09090b", // 深邃質感的背景色 (Zinc 900)
+  color: "#fafafa",
+  // 針對手機的上下留白，保留瀏海與底線空間
+  padding: "24px 16px 60px",
   boxSizing: "border-box",
+  fontFamily: "system-ui, -apple-system, sans-serif",
 }
 
 const topBarStyle: CSSProperties = {
@@ -417,149 +435,232 @@ const topBarStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "48px 1fr 48px",
   alignItems: "center",
+  marginBottom: 12,
 }
 
 const iconButtonStyle: CSSProperties = {
   background: "transparent",
   border: "none",
-  color: "#fff",
-  fontSize: 44,
+  color: "#a1a1aa",
+  fontSize: 40, // 放大返回鍵熱區
   lineHeight: 1,
+  padding: 0,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-start",
 }
 
 const saveIconStyle: CSSProperties = {
   background: "transparent",
   border: "none",
-  color: "#fff",
-  fontSize: 36,
+  color: "#10b981",
+  fontSize: 26, // 放大儲存鍵熱區
+  fontWeight: 600,
+  padding: 0,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
 }
 
 const titleStyle: CSSProperties = {
   textAlign: "center",
-  fontSize: 24,
-  fontWeight: 800,
+  fontSize: 18,
+  fontWeight: 600,
+  letterSpacing: "0.5px",
 }
 
 const metaStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  color: "#bbb",
-  fontSize: 18,
-  fontWeight: 700,
-  borderTop: "1px solid #1f2937",
-  padding: "14px 4px 18px",
+  alignItems: "center",
+  color: "#a1a1aa",
+  fontSize: 15,
+  padding: "12px 4px",
+  borderBottom: "1px solid #27272a",
+  marginBottom: 20,
+}
+
+const statusBadgeStyle: CSSProperties = {
+  padding: "6px 12px",
+  borderRadius: 16,
+  fontSize: 13,
+  fontWeight: 600,
+  letterSpacing: "0.5px",
 }
 
 const messageStyle: CSSProperties = {
-  color: "#2fd66f",
+  background: "rgba(16, 185, 129, 0.1)",
+  color: "#10b981",
+  padding: "14px 16px",
+  borderRadius: 12,
   fontSize: 15,
-  marginBottom: 12,
+  fontWeight: 500,
+  marginBottom: 20,
+  textAlign: "center",
+  border: "1px solid rgba(16, 185, 129, 0.2)",
 }
 
 const mutedStyle: CSSProperties = {
-  color: "#999",
+  color: "#71717a",
+  textAlign: "center",
+  padding: "20px 0",
+  fontSize: 15,
 }
 
 const errorStyle: CSSProperties = {
-  color: "#ff6666",
+  background: "rgba(239, 68, 68, 0.1)",
+  color: "#ef4444",
+  padding: "14px 16px",
+  borderRadius: 12,
+  fontSize: 15,
+  marginBottom: 20,
+  textAlign: "center",
+  border: "1px solid rgba(239, 68, 68, 0.2)",
 }
 
 const machineCardStyle: CSSProperties = {
-  background: "#101827",
-  borderRadius: 24,
-  padding: 14,
-  marginBottom: 18,
+  background: "#18181b", 
+  border: "1px solid #27272a", 
+  borderRadius: 20, // 增加手機版的圓角潤飾感
+  padding: "20px 16px",
+  marginBottom: 20,
+  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
+}
+
+const machineHeaderStyle: CSSProperties = {
+  borderBottom: "1px solid #27272a",
+  paddingBottom: 14,
+  marginBottom: 16,
 }
 
 const machineTitleStyle: CSSProperties = {
-  margin: "0 0 14px",
-  color: "#2fd66f",
-  fontSize: 30,
-  fontWeight: 900,
+  margin: 0,
+  color: "#fafafa",
+  fontSize: 18, // 手機上看標題大一點更清晰
+  fontWeight: 600,
+  letterSpacing: "0.5px",
 }
 
 const itemListStyle: CSSProperties = {
-  display: "grid",
-  gap: 12,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16, // 商品間距加大，防誤觸
 }
 
 const itemCardStyle: CSSProperties = {
-  border: "1px solid #273244",
-  borderRadius: 18,
-  padding: 14,
-  display: "grid",
-  gridTemplateColumns: "1fr auto",
+  display: "flex",
+  flexDirection: "column", // 手機版改為垂直佈局
   gap: 12,
-  alignItems: "center",
+  paddingBottom: 16,
+  borderBottom: "1px dashed #27272a",
 }
 
 const itemInfoStyle: CSSProperties = {
-  minWidth: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
 }
 
 const productNameStyle: CSSProperties = {
-  fontSize: 18,
-  fontWeight: 800,
+  fontSize: 16, // 放大品名字體
+  fontWeight: 500,
   lineHeight: 1.4,
+  color: "#e4e4e7",
+}
+
+const skuWrapperStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
 }
 
 const skuStyle: CSSProperties = {
-  fontSize: 18,
-  fontWeight: 800,
-  marginTop: 8,
+  fontSize: 13,
+  color: "#a1a1aa",
+  background: "#27272a",
+  padding: "4px 8px",
+  borderRadius: 6,
+  fontFamily: "monospace",
 }
 
 const boxStyle: CSSProperties = {
-  color: "#1da1f2",
-  fontSize: 16,
-  fontWeight: 800,
-  marginTop: 8,
+  color: "#60a5fa",
+  fontSize: 13,
+  fontWeight: 500,
 }
 
-const inputsRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "76px 24px 76px 24px",
-  gap: 8,
+// 獨立的輸入區塊（帶微弱背景色）
+const inputsContainerStyle: CSSProperties = {
+  display: "flex",
   alignItems: "center",
+  justifyContent: "space-between",
+  background: "#131316", // 區分出輸入熱區
+  border: "1px solid #27272a",
+  borderRadius: 14,
+  padding: "8px 12px",
+}
+
+const inputGroupStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  flex: 1,
+  justifyContent: "center",
+  gap: 8,
+}
+
+const inputDividerStyle: CSSProperties = {
+  width: 1,
+  height: 32,
+  background: "#27272a",
+  margin: "0 12px",
+}
+
+const unitLabelStyle: CSSProperties = {
+  color: "#71717a",
+  fontSize: 15,
+  fontWeight: 500,
 }
 
 const inputStyle: CSSProperties = {
-  width: 76,
-  height: 48,
-  borderRadius: 12,
-  border: "2px solid #111",
-  background: "#fff",
-  color: "#111",
-  fontSize: 22,
+  width: "100%", 
+  maxWidth: 80, // 不會無限變寬，保持比例
+  height: 48, // 標準手機觸控高度
+  borderRadius: 10,
+  border: "1px solid #3f3f46",
+  background: "#09090b",
+  color: "#fafafa",
+  fontSize: 18, // 放大輸入數字
+  fontWeight: 600,
   textAlign: "center",
-}
-
-const unitStyle: CSSProperties = {
-  color: "#ccc",
-  fontSize: 18,
-  fontWeight: 700,
+  transition: "border-color 0.2s",
+  outline: "none",
+  padding: 0,
 }
 
 const closeButtonStyle: CSSProperties = {
   width: "100%",
-  height: 56,
-  borderRadius: 16,
-  border: "1px solid #ff6666",
-  background: "#2a0f14",
-  color: "#ff9999",
-  fontSize: 18,
-  fontWeight: 800,
-  marginTop: 18,
+  height: 56, // 放大主按鈕觸控高度
+  borderRadius: 14,
+  border: "none",
+  background: "#fafafa", 
+  color: "#09090b",
+  fontSize: 17,
+  fontWeight: 600,
+  marginTop: 28,
+  cursor: "pointer",
+  transition: "opacity 0.2s",
+  boxShadow: "0 4px 12px rgba(250, 250, 250, 0.15)", // 增加按鈕立體感
 }
 
 const closedBoxStyle: CSSProperties = {
   textAlign: "center",
-  color: "#ffcc66",
-  fontSize: 18,
-  fontWeight: 800,
-  padding: 18,
-  border: "1px solid #664d1a",
-  borderRadius: 16,
-  background: "#1f1808",
-  marginTop: 18,
+  color: "#a1a1aa",
+  fontSize: 15,
+  fontWeight: 500,
+  padding: "18px",
+  border: "1px dashed #3f3f46",
+  borderRadius: 14,
+  marginTop: 28,
 }
