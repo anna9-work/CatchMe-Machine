@@ -1,3 +1,4 @@
+//MachineManage.tsx
 import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { supabase } from "../lib/supabase"
 
@@ -225,12 +226,17 @@ export default function MachineManage({
 }
 
 const pageStyle: CSSProperties = {
-  minHeight: "100vh",
+  minHeight: "100dvh",
+  width: "100%",
+  maxWidth: "100vw",
+  overflowX: "hidden",
   background: "#050913",
   color: "#fff",
   padding: "0 16px 32px",
   boxSizing: "border-box",
   fontFamily: "system-ui, -apple-system, sans-serif",
+  WebkitTextSizeAdjust: "100%",
+  touchAction: "manipulation",
 }
 
 const topBarStyle: CSSProperties = {
@@ -240,13 +246,14 @@ const topBarStyle: CSSProperties = {
   background: "#050913",
   paddingTop: "max(12px, env(safe-area-inset-top))",
   paddingBottom: 8,
-  margin: "0 -16px 12px",
-  paddingLeft: 16,
-  paddingRight: 16,
   display: "grid",
-  gridTemplateColumns: "48px 1fr 48px",
+  gridTemplateColumns: "48px minmax(0, 1fr) 48px",
   alignItems: "center",
   borderBottom: "1px solid #111827",
+  minWidth: 0,
+  width: "100%",
+  boxSizing: "border-box",
+  marginBottom: 12,
 }
 
 const backButtonStyle: CSSProperties = {
@@ -279,6 +286,8 @@ const refreshButtonStyle: CSSProperties = {
 
 const titleBlockStyle: CSSProperties = {
   textAlign: "center",
+  minWidth: 0,
+  overflow: "hidden",
 }
 
 const titleStyle: CSSProperties = {
@@ -286,12 +295,14 @@ const titleStyle: CSSProperties = {
   fontSize: 18,
   fontWeight: 800,
   letterSpacing: "0.5px",
+  lineHeight: 1.2,
 }
 
 const subTitleStyle: CSSProperties = {
   color: "#9ca3af",
   marginTop: 2,
   fontSize: 12,
+  lineHeight: 1.2,
 }
 
 const messageStyle: CSSProperties = {
@@ -303,6 +314,7 @@ const messageStyle: CSSProperties = {
   marginBottom: 12,
   fontSize: 14,
   textAlign: "center",
+  boxSizing: "border-box",
 }
 
 const errorStyle: CSSProperties = {
@@ -314,6 +326,7 @@ const errorStyle: CSSProperties = {
   marginBottom: 12,
   fontSize: 14,
   textAlign: "center",
+  boxSizing: "border-box",
 }
 
 const mutedStyle: CSSProperties = {
@@ -326,6 +339,10 @@ const mutedStyle: CSSProperties = {
 const listStyle: CSSProperties = {
   display: "grid",
   gap: 12,
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
 }
 
 const machineCardStyle: CSSProperties = {
@@ -333,15 +350,22 @@ const machineCardStyle: CSSProperties = {
   border: "1px solid #273244",
   borderRadius: 18,
   padding: "14px 14px 12px",
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
   cursor: "pointer",
   boxShadow: "0 4px 12px rgba(0, 0, 0, 0.18)",
+  overflow: "hidden",
 }
 
 const machineHeaderStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
+  gap: 10,
   marginBottom: 10,
+  minWidth: 0,
 }
 
 const machineNoStyle: CSSProperties = {
@@ -349,6 +373,10 @@ const machineNoStyle: CSSProperties = {
   fontSize: 24,
   fontWeight: 900,
   lineHeight: 1,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 }
 
 const countStyle: CSSProperties = {
@@ -357,19 +385,25 @@ const countStyle: CSSProperties = {
   background: "rgba(255, 255, 255, 0.06)",
   padding: "4px 9px",
   borderRadius: 999,
+  flexShrink: 0,
+  whiteSpace: "nowrap",
 }
 
 const previewListStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 6,
+  width: "100%",
+  minWidth: 0,
 }
 
 const previewRowStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 12,
+  width: "100%",
+  minWidth: 0,
 }
 
 const previewNameStyle: CSSProperties = {
@@ -378,7 +412,7 @@ const previewNameStyle: CSSProperties = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   minWidth: 0,
-  flex: 1,
+  width: "100%",
   fontSize: 14,
 }
 
@@ -386,9 +420,9 @@ const previewQtyStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: 15,
-  flexShrink: 0,
   minWidth: 32,
   textAlign: "right",
+  whiteSpace: "nowrap",
 }
 
 const emptyPreviewStyle: CSSProperties = {
@@ -409,6 +443,10 @@ const addMachineCardStyle: CSSProperties = {
   borderRadius: 18,
   padding: 12,
   marginTop: 4,
+  width: "100%",
+  maxWidth: "100%",
+  boxSizing: "border-box",
+  overflow: "hidden",
 }
 
 const bottomAddButtonStyle: CSSProperties = {

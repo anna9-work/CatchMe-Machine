@@ -1,3 +1,4 @@
+//MachineDetail.tsx
 import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { supabase } from "../lib/supabase"
 
@@ -361,7 +362,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
 
     const initialInnerQty = toSafeNumber(newQty)
 
-    if (initialInnerQty <= 0) {
+    if (initialInnerQty < 0) {
       setError("請輸入台內數量")
       return
     }
@@ -675,7 +676,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
 }
 
 const pageStyle: CSSProperties = {
-  minHeight: "100vh",
+  minHeight: "100dvh",
   width: "100%",
   maxWidth: "100vw",
   overflowX: "hidden",
@@ -689,10 +690,13 @@ const pageStyle: CSSProperties = {
 
 const topBarStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "44px 1fr 44px",
+  gridTemplateColumns: "44px minmax(0, 1fr) 44px",
   alignItems: "center",
   gap: 8,
   marginBottom: 14,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
 }
 
 const backButtonStyle: CSSProperties = {
@@ -704,11 +708,14 @@ const backButtonStyle: CSSProperties = {
   color: "#fff",
   fontSize: 30,
   lineHeight: 1,
+  padding: 0,
 }
 
 const titleWrapStyle: CSSProperties = {
   minWidth: 0,
+  maxWidth: "100%",
   textAlign: "center",
+  overflow: "hidden",
 }
 
 const smallTitleStyle: CSSProperties = {
@@ -723,6 +730,9 @@ const titleStyle: CSSProperties = {
   fontSize: 28,
   fontWeight: 900,
   lineHeight: 1.1,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 }
 
 const addProductButtonStyle: CSSProperties = {
@@ -735,6 +745,7 @@ const addProductButtonStyle: CSSProperties = {
   fontSize: 19,
   fontWeight: 900,
   marginBottom: 14,
+  boxSizing: "border-box",
 }
 
 const messageStyle: CSSProperties = {
@@ -745,6 +756,7 @@ const messageStyle: CSSProperties = {
   padding: "10px 12px",
   marginBottom: 12,
   fontSize: 15,
+  boxSizing: "border-box",
 }
 
 const errorStyle: CSSProperties = {
@@ -755,6 +767,7 @@ const errorStyle: CSSProperties = {
   padding: "10px 12px",
   marginBottom: 12,
   fontSize: 15,
+  boxSizing: "border-box",
 }
 
 const mutedStyle: CSSProperties = {
@@ -765,10 +778,17 @@ const mutedStyle: CSSProperties = {
 const listStyle: CSSProperties = {
   display: "grid",
   gap: 12,
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
 }
 
 const cardStyle: CSSProperties = {
   position: "relative",
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
   background: "#111827",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: 20,
@@ -790,12 +810,15 @@ const deleteButtonStyle: CSSProperties = {
   fontSize: 28,
   fontWeight: 900,
   lineHeight: 1,
+  padding: 0,
 }
 
 const skuStyle: CSSProperties = {
   fontSize: 20,
   fontWeight: 900,
   marginBottom: 8,
+  maxWidth: "100%",
+  overflowWrap: "anywhere",
   wordBreak: "break-word",
 }
 
@@ -804,24 +827,30 @@ const nameStyle: CSSProperties = {
   lineHeight: 1.4,
   marginBottom: 16,
   color: "#e5e7eb",
+  maxWidth: "100%",
+  overflowWrap: "anywhere",
   wordBreak: "break-word",
 }
 
 const qtyRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 112px",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(88px, 112px)",
   alignItems: "center",
   gap: 10,
+  width: "100%",
+  minWidth: 0,
 }
 
 const qtyLabelStyle: CSSProperties = {
   fontSize: 16,
   color: "#cbd5e1",
   fontWeight: 700,
+  minWidth: 0,
 }
 
 const qtyInputStyle: CSSProperties = {
   width: "100%",
+  minWidth: 0,
   height: 48,
   borderRadius: 14,
   border: "1px solid #475569",
@@ -838,6 +867,7 @@ const emptyBoxStyle: CSSProperties = {
   borderRadius: 18,
   padding: 16,
   fontSize: 15,
+  boxSizing: "border-box",
 }
 
 const savingStyle: CSSProperties = {
@@ -849,6 +879,9 @@ const savingStyle: CSSProperties = {
 const modalMaskStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
+  width: "100vw",
+  maxWidth: "100vw",
+  overflowX: "hidden",
   background: "rgba(0,0,0,0.76)",
   display: "flex",
   alignItems: "flex-end",
@@ -858,8 +891,10 @@ const modalMaskStyle: CSSProperties = {
 const modalStyle: CSSProperties = {
   width: "100%",
   maxWidth: 560,
+  minWidth: 0,
   maxHeight: "88dvh",
   overflowY: "auto",
+  overflowX: "hidden",
   margin: "0 auto",
   background: "#101827",
   borderRadius: "24px 24px 0 0",
@@ -891,6 +926,7 @@ const fieldLabelStyle: CSSProperties = {
 
 const searchInputStyle: CSSProperties = {
   width: "100%",
+  minWidth: 0,
   height: 50,
   borderRadius: 14,
   border: "1px solid #334155",
@@ -911,12 +947,16 @@ const selectedBoxStyle: CSSProperties = {
   marginBottom: 12,
   lineHeight: 1.5,
   fontSize: 15,
+  boxSizing: "border-box",
+  overflowWrap: "anywhere",
 }
 
 const productListStyle: CSSProperties = {
   display: "grid",
   gap: 10,
   marginBottom: 14,
+  width: "100%",
+  minWidth: 0,
 }
 
 const productButtonStyle: CSSProperties = {
@@ -928,6 +968,10 @@ const productButtonStyle: CSSProperties = {
   padding: 12,
   fontSize: 16,
   lineHeight: 1.5,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  overflowWrap: "anywhere",
 }
 
 const barcodeStyle: CSSProperties = {
@@ -944,12 +988,15 @@ const hintStyle: CSSProperties = {
 
 const modalActionsStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
   gap: 10,
   position: "sticky",
   bottom: 0,
   background: "#101827",
   paddingTop: 10,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
 }
 
 const cancelButtonStyle: CSSProperties = {
@@ -960,6 +1007,7 @@ const cancelButtonStyle: CSSProperties = {
   color: "#fff",
   fontSize: 17,
   fontWeight: 800,
+  minWidth: 0,
 }
 
 const confirmButtonStyle: CSSProperties = {
@@ -970,6 +1018,7 @@ const confirmButtonStyle: CSSProperties = {
   color: "#fff",
   fontSize: 17,
   fontWeight: 900,
+  minWidth: 0,
 }
 
 const dangerConfirmButtonStyle: CSSProperties = {
