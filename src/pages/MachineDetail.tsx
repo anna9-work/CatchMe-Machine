@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { supabase } from "../lib/supabase"
 
 type Props = {
@@ -22,13 +22,48 @@ type Product = {
 
 const GROUP_CODE = "catch_0001"
 
+function getTaipeiDateString() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date())
+
+  const year = parts.find((p) => p.type === "year")?.value ?? ""
+  const month = parts.find((p) => p.type === "month")?.value ?? ""
+  const day = parts.find((p) => p.type === "day")?.value ?? ""
+
+  return `${year}-${month}-${day}`
+}
+
+function toSheetDate(dateText: string) {
+  const [, month, day] = dateText.split("-")
+  return `${month}${day}`
+}
+
+function toSafeNumber(value: string) {
+  if (value.trim() === "") return 0
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return Math.floor(n)
+}
+
 export default function MachineDetail({ machineNo, onBack }: Props) {
+  const todayText = useMemo(() => getTaipeiDateString(), [])
+
   const [items, setItems] = useState<MachineItem[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [searchText, setSearchText] = useState("")
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [newQty, setNewQty] = useState("")
+  const [mountedDate, setMountedDate] = useState(todayText)
+
+  const [closingItem, setClosingItem] = useState<MachineItem | null>(null)
+  const [removedQty, setRemovedQty] = useState("")
+  const [removedDate, setRemovedDate] = useState(todayText)
+
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -189,13 +224,6 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
     }
   }
 
-  function toSafeNumber(value: string) {
-    if (value.trim() === "") return 0
-    const n = Number(value)
-    if (!Number.isFinite(n) || n < 0) return 0
-    return n
-  }
-
   function updateLocalQty(itemId: number, value: string) {
     const qty = toSafeNumber(value)
 
@@ -231,27 +259,95 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
     }
   }
 
-  async function deleteItem(item: MachineItem) {
-    const ok = window.confirm(`確定刪除 ${item.product_sku}？`)
+  function openCloseModal(item: MachineItem) {
+    setClosingItem(item)
+    setRemovedQty("")
+    setRemovedDate(todayText)
+    setError("")
+    setMessage("")
+  }
+
+  function closeCloseModal() {
+    setClosingItem(null)
+    setRemovedQty("")
+    setRemovedDate(todayText)
+  }
+
+  async function confirmCloseItem() {
+    if (!closingItem) return
+
+    const actualRemovedQty = toSafeNumber(removedQty)
+
+    if (actualRemovedQty < 0 || removedQty.trim() === "") {
+      setError("請輸入實際撤台數量")
+      return
+    }
+
+    if (!removedDate) {
+      setError("請選擇撤台日期")
+      return
+    }
+
+    const ok = window.confirm(
+      `確認撤台結算？\n\n機台：${machineNo}\n商品：${
+        closingItem.product_name || closingItem.product_sku
+      }\n實際撤台數量：${actualRemovedQty}`
+    )
+
     if (!ok) return
 
     try {
       setSaving(true)
       setError("")
+      setMessage("")
 
-      const { error } = await supabase.rpc("rpc_delete_machine_item", {
-        p_group: GROUP_CODE,
-        p_machine_no: machineNo,
-        p_product_sku: item.product_sku,
-      })
+      const { data: lifecycle, error: lifecycleFindError } = await supabase
+        .from("machine_lifecycles")
+        .select("id")
+        .eq("group_code", GROUP_CODE)
+        .eq("machine_no", machineNo)
+        .eq("product_sku", closingItem.product_sku)
+        .eq("status", "active")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-      if (error) throw error
+      if (lifecycleFindError) throw lifecycleFindError
 
-      setMessage("已刪除")
+      if (!lifecycle?.id) {
+        throw new Error("找不到這個商品的啟用中生命週期，無法撤台結算")
+      }
+
+      const { error: lifecycleUpdateError } = await supabase
+        .from("machine_lifecycles")
+        .update({
+          status: "closed",
+          actual_removed_qty: actualRemovedQty,
+          removed_at: `${removedDate}T05:00:00+08:00`,
+          removed_biz_date: removedDate,
+          remark: "機台管理 X 撤台結算",
+        })
+        .eq("id", lifecycle.id)
+
+      if (lifecycleUpdateError) throw lifecycleUpdateError
+
+      const { error: deleteError } = await supabase.rpc(
+        "rpc_delete_machine_item",
+        {
+          p_group: GROUP_CODE,
+          p_machine_no: machineNo,
+          p_product_sku: closingItem.product_sku,
+        }
+      )
+
+      if (deleteError) throw deleteError
+
+      closeCloseModal()
+      setMessage("已撤台結算並移除商品")
       await loadItems()
     } catch (err: any) {
       console.error(err)
-      setError(err.message ?? "刪除失敗")
+      setError(err.message ?? "撤台失敗")
     } finally {
       setSaving(false)
     }
@@ -260,6 +356,18 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
   async function addProduct() {
     if (!selectedProduct) {
       setError("請先選擇商品")
+      return
+    }
+
+    const initialInnerQty = toSafeNumber(newQty)
+
+    if (initialInnerQty <= 0) {
+      setError("請輸入台內數量")
+      return
+    }
+
+    if (!mountedDate) {
+      setError("請選擇上架日期")
       return
     }
 
@@ -275,23 +383,49 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
     try {
       setSaving(true)
       setError("")
+      setMessage("")
 
-      const { error } = await supabase.rpc("rpc_upsert_machine_item", {
-        p_group: GROUP_CODE,
-        p_machine_no: machineNo,
-        p_product_sku: selectedProduct.product_sku,
-        p_qty_piece: toSafeNumber(newQty),
-      })
+      const { error: upsertError } = await supabase.rpc(
+        "rpc_upsert_machine_item",
+        {
+          p_group: GROUP_CODE,
+          p_machine_no: machineNo,
+          p_product_sku: selectedProduct.product_sku,
+          p_qty_piece: initialInnerQty,
+        }
+      )
 
-      if (error) throw error
+      if (upsertError) throw upsertError
 
-      setShowAdd(false)
-      setSearchText("")
-      setSelectedProduct(null)
-      setNewQty("")
-      setProducts([])
-      setMessage("已加入商品")
+      const { data: itemRow, error: itemError } = await supabase
+        .from("machine_items")
+        .select("id")
+        .eq("group_code", GROUP_CODE)
+        .eq("machine_no", machineNo)
+        .eq("product_sku", selectedProduct.product_sku)
+        .maybeSingle()
 
+      if (itemError) throw itemError
+
+      const { error: lifecycleError } = await supabase
+        .from("machine_lifecycles")
+        .insert({
+          group_code: GROUP_CODE,
+          machine_item_id: itemRow?.id ?? null,
+          machine_no: machineNo,
+          product_sku: selectedProduct.product_sku,
+          initial_inner_qty: initialInnerQty,
+          target_inner_qty: initialInnerQty,
+          mounted_at: `${mountedDate}T05:00:00+08:00`,
+          mounted_biz_date: mountedDate,
+          mounted_sheet_date: toSheetDate(mountedDate),
+          status: "active",
+        })
+
+      if (lifecycleError) throw lifecycleError
+
+      closeAddModal()
+      setMessage("已加入商品並建立生命週期")
       await loadItems()
     } catch (err: any) {
       console.error(err)
@@ -301,6 +435,15 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
     }
   }
 
+  function closeAddModal() {
+    setShowAdd(false)
+    setSearchText("")
+    setSelectedProduct(null)
+    setNewQty("")
+    setMountedDate(todayText)
+    setProducts([])
+  }
+
   return (
     <div style={pageStyle}>
       <div style={topBarStyle}>
@@ -308,11 +451,12 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
           ←
         </button>
 
-        <h1 style={titleStyle}>機台 #{machineNo}</h1>
+        <div style={titleWrapStyle}>
+          <div style={smallTitleStyle}>機台管理</div>
+          <h1 style={titleStyle}>#{machineNo}</h1>
+        </div>
 
-        <button onClick={() => setMessage("已儲存")} style={saveButtonStyle}>
-          儲存
-        </button>
+        <div />
       </div>
 
       <button onClick={() => setShowAdd(true)} style={addProductButtonStyle}>
@@ -331,7 +475,10 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
         <div style={listStyle}>
           {items.map((item) => (
             <div key={item.id} style={cardStyle}>
-              <button onClick={() => deleteItem(item)} style={deleteButtonStyle}>
+              <button
+                onClick={() => openCloseModal(item)}
+                style={deleteButtonStyle}
+              >
                 ×
               </button>
 
@@ -364,8 +511,11 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
       {showAdd && (
         <div style={modalMaskStyle}>
           <div style={modalStyle}>
+            <div style={modalHandleStyle} />
+
             <h2 style={modalTitleStyle}>加入商品</h2>
 
+            <label style={fieldLabelStyle}>搜尋商品</label>
             <input
               value={searchText}
               onChange={(e) => {
@@ -381,7 +531,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
 
             {selectedProduct && (
               <div style={selectedBoxStyle}>
-                已選：{selectedProduct.product_sku}
+                <strong>已選：{selectedProduct.product_sku}</strong>
                 <br />
                 {selectedProduct.product_name}
                 {selectedProduct.barcode && (
@@ -403,7 +553,7 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
                     borderColor:
                       selectedProduct?.product_sku === product.product_sku
                         ? "#60a5fa"
-                        : "#333",
+                        : "#334155",
                   }}
                 >
                   <strong>{product.product_sku}</strong>
@@ -423,27 +573,31 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
               )}
             </div>
 
+            <label style={fieldLabelStyle}>初始台內數量</label>
             <input
               value={newQty}
               onChange={(e) => setNewQty(e.target.value)}
-              placeholder="台內數量"
+              placeholder="例如：100"
               inputMode="numeric"
               type="number"
               min={0}
               style={searchInputStyle}
             />
 
+            <label style={fieldLabelStyle}>上架日期</label>
+            <input
+              value={mountedDate}
+              onChange={(e) => setMountedDate(e.target.value)}
+              type="date"
+              style={searchInputStyle}
+            />
+
+            <div style={hintStyle}>
+              上架日期會用來抓當天機台補貨明細，之後計算初始落地。
+            </div>
+
             <div style={modalActionsStyle}>
-              <button
-                onClick={() => {
-                  setShowAdd(false)
-                  setSearchText("")
-                  setSelectedProduct(null)
-                  setNewQty("")
-                  setProducts([])
-                }}
-                style={cancelButtonStyle}
-              >
+              <button onClick={closeAddModal} style={cancelButtonStyle}>
                 取消
               </button>
 
@@ -458,149 +612,244 @@ export default function MachineDetail({ machineNo, onBack }: Props) {
           </div>
         </div>
       )}
+
+      {closingItem && (
+        <div style={modalMaskStyle}>
+          <div style={modalStyle}>
+            <div style={modalHandleStyle} />
+
+            <h2 style={modalTitleStyle}>撤台結算</h2>
+
+            <div style={selectedBoxStyle}>
+              <strong>機台：#{machineNo}</strong>
+              <br />
+              商品：{closingItem.product_sku}
+              <br />
+              {closingItem.product_name || closingItem.product_sku}
+              <br />
+              目前台內數：{closingItem.qty_piece}
+            </div>
+
+            <label style={fieldLabelStyle}>實際撤台數量</label>
+            <input
+              value={removedQty}
+              onChange={(e) => setRemovedQty(e.target.value)}
+              placeholder="請輸入實際撤回幾個"
+              inputMode="numeric"
+              type="number"
+              min={0}
+              style={searchInputStyle}
+              autoFocus
+            />
+
+            <label style={fieldLabelStyle}>撤台日期</label>
+            <input
+              value={removedDate}
+              onChange={(e) => setRemovedDate(e.target.value)}
+              type="date"
+              style={searchInputStyle}
+            />
+
+            <div style={hintStyle}>
+              確認後會關閉這個商品的生命週期，並從目前機台商品中移除。
+            </div>
+
+            <div style={modalActionsStyle}>
+              <button onClick={closeCloseModal} style={cancelButtonStyle}>
+                取消
+              </button>
+
+              <button
+                onClick={confirmCloseItem}
+                disabled={saving}
+                style={dangerConfirmButtonStyle}
+              >
+                確認撤台
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
+  width: "100%",
+  maxWidth: "100vw",
+  overflowX: "hidden",
   background: "#050913",
   color: "#fff",
-  padding: "20px 16px 28px",
+  padding: "calc(env(safe-area-inset-top, 0px) + 10px) 14px 28px",
   boxSizing: "border-box",
+  WebkitTextSizeAdjust: "100%",
+  touchAction: "manipulation",
 }
 
 const topBarStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "48px 1fr 88px",
+  gridTemplateColumns: "44px 1fr 44px",
   alignItems: "center",
-  marginBottom: 18,
+  gap: 8,
+  marginBottom: 14,
 }
 
 const backButtonStyle: CSSProperties = {
-  background: "transparent",
-  border: "none",
+  width: 44,
+  height: 44,
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 14,
   color: "#fff",
-  fontSize: 34,
+  fontSize: 30,
+  lineHeight: 1,
+}
+
+const titleWrapStyle: CSSProperties = {
+  minWidth: 0,
+  textAlign: "center",
+}
+
+const smallTitleStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 13,
+  fontWeight: 700,
+  marginBottom: 2,
 }
 
 const titleStyle: CSSProperties = {
   margin: 0,
-  fontSize: 30,
+  fontSize: 28,
   fontWeight: 900,
-}
-
-const saveButtonStyle: CSSProperties = {
-  height: 48,
-  borderRadius: 16,
-  border: "none",
-  background: "#60a5fa",
-  color: "#fff",
-  fontSize: 18,
-  fontWeight: 800,
+  lineHeight: 1.1,
 }
 
 const addProductButtonStyle: CSSProperties = {
   width: "100%",
-  height: 58,
+  minHeight: 54,
   borderRadius: 18,
   border: "none",
-  background: "#60a5fa",
+  background: "#2563eb",
   color: "#fff",
-  fontSize: 22,
-  fontWeight: 900,
-  marginBottom: 20,
-}
-
-const messageStyle: CSSProperties = {
-  color: "#2fd66f",
-  marginBottom: 12,
-}
-
-const errorStyle: CSSProperties = {
-  color: "#ff6666",
-  marginBottom: 12,
-}
-
-const mutedStyle: CSSProperties = {
-  color: "#999",
-}
-
-const listStyle: CSSProperties = {
-  display: "grid",
-  gap: 18,
-}
-
-const cardStyle: CSSProperties = {
-  position: "relative",
-  background: "#3a3a3a",
-  borderRadius: 24,
-  padding: 18,
-}
-
-const deleteButtonStyle: CSSProperties = {
-  position: "absolute",
-  top: 12,
-  right: 16,
-  background: "transparent",
-  border: "none",
-  color: "red",
-  fontSize: 28,
-  fontWeight: 900,
-}
-
-const skuStyle: CSSProperties = {
-  fontSize: 26,
+  fontSize: 19,
   fontWeight: 900,
   marginBottom: 14,
 }
 
+const messageStyle: CSSProperties = {
+  color: "#4ade80",
+  background: "rgba(74,222,128,0.1)",
+  border: "1px solid rgba(74,222,128,0.22)",
+  borderRadius: 14,
+  padding: "10px 12px",
+  marginBottom: 12,
+  fontSize: 15,
+}
+
+const errorStyle: CSSProperties = {
+  color: "#fca5a5",
+  background: "rgba(248,113,113,0.1)",
+  border: "1px solid rgba(248,113,113,0.22)",
+  borderRadius: 14,
+  padding: "10px 12px",
+  marginBottom: 12,
+  fontSize: 15,
+}
+
+const mutedStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 15,
+}
+
+const listStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+}
+
+const cardStyle: CSSProperties = {
+  position: "relative",
+  background: "#111827",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 20,
+  padding: "16px 54px 16px 14px",
+  boxSizing: "border-box",
+  overflow: "hidden",
+}
+
+const deleteButtonStyle: CSSProperties = {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  width: 38,
+  height: 38,
+  background: "rgba(239,68,68,0.12)",
+  border: "1px solid rgba(239,68,68,0.28)",
+  borderRadius: 14,
+  color: "#f87171",
+  fontSize: 28,
+  fontWeight: 900,
+  lineHeight: 1,
+}
+
+const skuStyle: CSSProperties = {
+  fontSize: 20,
+  fontWeight: 900,
+  marginBottom: 8,
+  wordBreak: "break-word",
+}
+
 const nameStyle: CSSProperties = {
-  fontSize: 22,
+  fontSize: 17,
   lineHeight: 1.4,
-  marginBottom: 22,
+  marginBottom: 16,
+  color: "#e5e7eb",
+  wordBreak: "break-word",
 }
 
 const qtyRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 120px",
+  gridTemplateColumns: "1fr 112px",
   alignItems: "center",
-  gap: 12,
+  gap: 10,
 }
 
 const qtyLabelStyle: CSSProperties = {
-  fontSize: 22,
-  color: "#fff",
+  fontSize: 16,
+  color: "#cbd5e1",
+  fontWeight: 700,
 }
 
 const qtyInputStyle: CSSProperties = {
-  width: 120,
-  height: 52,
-  borderRadius: 10,
-  border: "1px solid #999",
-  background: "#000",
+  width: "100%",
+  height: 48,
+  borderRadius: 14,
+  border: "1px solid #475569",
+  background: "#020617",
   color: "#fff",
-  fontSize: 22,
+  fontSize: 18,
   padding: "0 12px",
   boxSizing: "border-box",
 }
 
 const emptyBoxStyle: CSSProperties = {
-  color: "#999",
+  color: "#94a3b8",
   border: "1px solid #273244",
   borderRadius: 18,
-  padding: 18,
+  padding: 16,
+  fontSize: 15,
 }
 
 const savingStyle: CSSProperties = {
-  color: "#999",
+  color: "#94a3b8",
   marginTop: 16,
+  fontSize: 15,
 }
 
 const modalMaskStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.75)",
+  background: "rgba(0,0,0,0.76)",
   display: "flex",
   alignItems: "flex-end",
   zIndex: 100,
@@ -608,35 +857,60 @@ const modalMaskStyle: CSSProperties = {
 
 const modalStyle: CSSProperties = {
   width: "100%",
-  maxHeight: "86vh",
+  maxWidth: 560,
+  maxHeight: "88dvh",
   overflowY: "auto",
+  margin: "0 auto",
   background: "#101827",
   borderRadius: "24px 24px 0 0",
-  padding: 18,
+  padding: "10px 16px calc(env(safe-area-inset-bottom, 0px) + 16px)",
   boxSizing: "border-box",
 }
 
+const modalHandleStyle: CSSProperties = {
+  width: 46,
+  height: 5,
+  borderRadius: 999,
+  background: "#475569",
+  margin: "0 auto 14px",
+}
+
 const modalTitleStyle: CSSProperties = {
-  marginTop: 0,
+  margin: "0 0 14px",
+  fontSize: 22,
+  fontWeight: 900,
+}
+
+const fieldLabelStyle: CSSProperties = {
+  display: "block",
+  color: "#cbd5e1",
+  fontSize: 14,
+  fontWeight: 800,
+  margin: "0 0 6px",
 }
 
 const searchInputStyle: CSSProperties = {
   width: "100%",
-  height: 52,
+  height: 50,
   borderRadius: 14,
-  border: "1px solid #333",
-  background: "#000",
+  border: "1px solid #334155",
+  background: "#020617",
   color: "#fff",
-  fontSize: 18,
+  fontSize: 16,
   padding: "0 14px",
   boxSizing: "border-box",
   marginBottom: 12,
 }
 
 const selectedBoxStyle: CSSProperties = {
-  color: "#2fd66f",
+  color: "#4ade80",
+  background: "rgba(74,222,128,0.1)",
+  border: "1px solid rgba(74,222,128,0.22)",
+  borderRadius: 14,
+  padding: 12,
   marginBottom: 12,
   lineHeight: 1.5,
+  fontSize: 15,
 }
 
 const productListStyle: CSSProperties = {
@@ -647,7 +921,7 @@ const productListStyle: CSSProperties = {
 
 const productButtonStyle: CSSProperties = {
   textAlign: "left",
-  border: "1px solid #333",
+  border: "1px solid #334155",
   borderRadius: 14,
   background: "#1a2233",
   color: "#fff",
@@ -657,22 +931,35 @@ const productButtonStyle: CSSProperties = {
 }
 
 const barcodeStyle: CSSProperties = {
-  color: "#aaa",
+  color: "#94a3b8",
+  fontSize: 14,
+}
+
+const hintStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 13,
+  lineHeight: 1.5,
+  margin: "-4px 0 14px",
 }
 
 const modalActionsStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
   gap: 10,
+  position: "sticky",
+  bottom: 0,
+  background: "#101827",
+  paddingTop: 10,
 }
 
 const cancelButtonStyle: CSSProperties = {
   height: 52,
   borderRadius: 14,
-  border: "1px solid #555",
+  border: "1px solid #475569",
   background: "transparent",
   color: "#fff",
-  fontSize: 18,
+  fontSize: 17,
+  fontWeight: 800,
 }
 
 const confirmButtonStyle: CSSProperties = {
@@ -681,6 +968,11 @@ const confirmButtonStyle: CSSProperties = {
   border: "none",
   background: "#2563eb",
   color: "#fff",
-  fontSize: 18,
-  fontWeight: 800,
+  fontSize: 17,
+  fontWeight: 900,
+}
+
+const dangerConfirmButtonStyle: CSSProperties = {
+  ...confirmButtonStyle,
+  background: "#dc2626",
 }
