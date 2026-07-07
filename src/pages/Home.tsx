@@ -5,48 +5,72 @@ type Props = {
   onAuditClick: () => void
   onHistoryClick: () => void
   onMachineClick: () => void
+  onProductClick: () => void
+  onInboundClick: () => void
+  onLineBotClick: () => void
 }
 
 export default function Home({
   onAuditClick,
   onHistoryClick,
   onMachineClick,
+  onProductClick,
+  onInboundClick,
+  onLineBotClick,
 }: Props) {
   return (
     <div style={pageStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>機台盤點系統</h1>
+        <h1 style={titleStyle}>CatchMe 管理系統</h1>
         <p style={subtitleStyle}>CatchMe Machine</p>
       </div>
 
-      <div style={buttonContainerStyle}>
-        <button style={primaryButtonStyle} onClick={onAuditClick}>
-          今日盤點
-        </button>
+      <div style={sectionListStyle}>
+        <section style={sectionStyle}>
+          <div style={sectionTitleStyle}>商品管理</div>
+          <button style={primaryButtonStyle} onClick={onProductClick}>
+            新增 / 編輯商品
+          </button>
+        </section>
 
-        <button style={secondaryButtonStyle} onClick={onHistoryClick}>
-          歷史紀錄
-        </button>
+        <section style={sectionStyle}>
+          <div style={sectionTitleStyle}>倉庫管理</div>
+          <button style={secondaryButtonStyle} onClick={onInboundClick}>
+            入庫
+          </button>
+        </section>
 
-        <button style={secondaryButtonStyle} onClick={onMachineClick}>
-          機台管理
-        </button>
+        <section style={sectionStyle}>
+          <div style={sectionTitleStyle}>機台管理</div>
+          <button style={secondaryButtonStyle} onClick={onMachineClick}>
+            機台生命週期
+          </button>
+          <button style={secondaryButtonStyle} onClick={onAuditClick}>
+            今日盤點
+          </button>
+          <button style={secondaryButtonStyle} onClick={onHistoryClick}>
+            歷史紀錄
+          </button>
+        </section>
+
+        <section style={sectionStyle}>
+          <div style={sectionTitleStyle}>LINE Bot</div>
+          <button style={secondaryButtonStyle} onClick={onLineBotClick}>
+            記錄 / 查詢 / 取消
+          </button>
+        </section>
       </div>
-      
-      <div style={footerStyle}>
-        v1.0.0
-      </div>
+
+      <div style={footerStyle}>v1.1.0</div>
     </div>
   )
 }
 
-/* ---------------- 手機版高級深色質感 CSS Properties ---------------- */
-
 const pageStyle: CSSProperties = {
-  minHeight: "100vh",
-  background: "#09090b", // 深邃質感的背景色 (Zinc 900)
+  minHeight: "100dvh",
+  background: "#050913",
   color: "#fafafa",
-  padding: "48px 24px 32px", // 加大左右邊距，讓畫面更集中
+  padding: "calc(env(safe-area-inset-top, 0px) + 28px) 18px 28px",
   boxSizing: "border-box",
   fontFamily: "system-ui, -apple-system, sans-serif",
   display: "flex",
@@ -54,72 +78,82 @@ const pageStyle: CSSProperties = {
 }
 
 const headerStyle: CSSProperties = {
-  marginTop: "10vh", // 讓標題稍微往下壓，視覺重心更穩
-  marginBottom: 48,
+  marginBottom: 24,
   display: "flex",
   flexDirection: "column",
   gap: 8,
+  textAlign: "left",
 }
 
 const titleStyle: CSSProperties = {
   margin: 0,
-  fontSize: 32,
-  fontWeight: 700,
-  letterSpacing: "1px",
+  fontSize: 30,
+  lineHeight: 1.12,
+  fontWeight: 900,
+  letterSpacing: 0,
   color: "#fafafa",
 }
 
 const subtitleStyle: CSSProperties = {
   margin: 0,
-  color: "#10b981", // 使用與盤點頁一致的翡翠綠作為品牌點綴色
+  color: "#8dd7ff",
   fontSize: 16,
-  fontWeight: 500,
-  letterSpacing: "0.5px",
+  fontWeight: 800,
+  letterSpacing: 0,
 }
 
-const buttonContainerStyle: CSSProperties = {
+const sectionListStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 16, // 按鈕之間的間距加大，防止誤觸
-  flex: 1, // 佔據剩餘空間
+  gap: 12,
+  flex: 1,
 }
 
-// 主按鈕：高對比反白，吸引視覺焦點
+const sectionStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  border: "1px solid rgba(148,163,184,0.2)",
+  borderRadius: 8,
+  background: "#0b1220",
+  padding: 12,
+}
+
+const sectionTitleStyle: CSSProperties = {
+  color: "#cbd5e1",
+  fontSize: 14,
+  fontWeight: 900,
+}
+
 const primaryButtonStyle: CSSProperties = {
   width: "100%",
-  height: 60, // 放大觸控高度
-  borderRadius: 16,
+  minHeight: 56,
+  borderRadius: 14,
   border: "none",
   background: "#fafafa",
-  color: "#09090b",
-  fontSize: 18,
-  fontWeight: 600,
+  color: "#0f172a",
+  fontSize: 17,
+  fontWeight: 900,
   cursor: "pointer",
-  transition: "opacity 0.2s",
-  boxShadow: "0 4px 12px rgba(250, 250, 250, 0.15)",
 }
 
-// 次要按鈕：深色卡片質感，融入背景但不失層次
 const secondaryButtonStyle: CSSProperties = {
   width: "100%",
-  height: 60,
-  borderRadius: 16,
-  border: "1px solid #27272a",
-  background: "#18181b",
+  minHeight: 54,
+  borderRadius: 14,
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "#101827",
   color: "#e4e4e7",
-  fontSize: 18,
-  fontWeight: 500,
+  fontSize: 17,
+  fontWeight: 800,
   cursor: "pointer",
-  transition: "background 0.2s",
-  boxShadow: "0 2px 6px rgba(0, 0, 0, 0.2)",
 }
 
 const footerStyle: CSSProperties = {
   textAlign: "center",
-  color: "#3f3f46",
+  color: "#475569",
   fontSize: 13,
-  fontWeight: 500,
+  fontWeight: 700,
   fontFamily: "monospace",
-  marginTop: "auto", // 將版本號推至最底部
+  marginTop: "auto",
   paddingTop: 32,
 }

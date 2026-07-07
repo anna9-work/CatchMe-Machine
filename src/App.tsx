@@ -6,9 +6,20 @@ import AuditPage from "./pages/AuditPage"
 import AuditHistory from "./pages/AuditHistory"
 import MachineManage from "./pages/MachineManage"
 import MachineDetail from "./pages/MachineDetail"
+import ProductManage from "./pages/ProductManage"
+import InboundPage from "./pages/InboundPage"
+import LineBotPage from "./pages/LineBotPage"
 import { supabase } from "./lib/supabase"
 
-type Page = "home" | "audit" | "history" | "machines" | "machineDetail"
+type Page =
+  | "home"
+  | "audit"
+  | "history"
+  | "machines"
+  | "machineDetail"
+  | "products"
+  | "inbound"
+  | "lineBot"
 
 const GROUP_CODE = "catch_0001"
 
@@ -88,6 +99,18 @@ function App() {
     )
   }
 
+  if (page === "products") {
+    return <ProductManage onBack={() => setPage("home")} />
+  }
+
+  if (page === "inbound") {
+    return <InboundPage onBack={() => setPage("home")} />
+  }
+
+  if (page === "lineBot") {
+    return <LineBotPage onBack={() => setPage("home")} />
+  }
+
   return (
     <>
       {error && (
@@ -107,6 +130,9 @@ function App() {
         onAuditClick={openTodayAudit}
         onHistoryClick={() => setPage("history")}
         onMachineClick={() => setPage("machines")}
+        onProductClick={() => setPage("products")}
+        onInboundClick={() => setPage("inbound")}
+        onLineBotClick={() => setPage("lineBot")}
       />
     </>
   )
