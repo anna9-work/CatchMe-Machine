@@ -1,3 +1,4 @@
+//home.tsx
 import type { CSSProperties } from "react"
 
 type Props = {
