@@ -84,6 +84,7 @@ function App() {
     return (
       <MachineManage
         onBack={() => setPage("home")}
+        onAuditClick={openTodayAudit}
         onOpenMachine={(machineNo) => {
           setSelectedMachineNo(machineNo)
           setPage("machineDetail")

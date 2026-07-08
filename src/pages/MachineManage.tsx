@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase"
 
 type Props = {
   onBack: () => void
+  onAuditClick: () => void
   onOpenMachine: (machineNo: string) => void
 }
 
@@ -25,6 +26,7 @@ const GROUP_CODE = "catch_0001"
 
 export default function MachineManage({
   onBack,
+  onAuditClick,
   onOpenMachine,
 }: Props) {
   const [machines, setMachines] = useState<Machine[]>([])
@@ -158,8 +160,8 @@ export default function MachineManage({
           <div style={subTitleStyle}>{machines.length} 台機台</div>
         </div>
 
-        <button onClick={loadData} style={refreshButtonStyle}>
-          ↻
+        <button onClick={onAuditClick} style={auditButtonStyle}>
+          盤點
         </button>
       </div>
 
@@ -270,12 +272,13 @@ const backButtonStyle: CSSProperties = {
   justifyContent: "flex-start",
 }
 
-const refreshButtonStyle: CSSProperties = {
+const auditButtonStyle: CSSProperties = {
   background: "transparent",
   border: "none",
-  color: "#d1d5db",
-  fontSize: 24,
-  lineHeight: 1,
+  color: "#60a5fa",
+  fontSize: 15,
+  fontWeight: 800,
+  lineHeight: 1.2,
   padding: 0,
   minHeight: 44,
   cursor: "pointer",
