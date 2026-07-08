@@ -7,153 +7,444 @@ type Props = {
   onMachineClick: () => void
   onProductClick: () => void
   onInboundClick: () => void
+  onAdjustmentClick: () => void
   onLineBotClick: () => void
 }
 
+type ActionCard = {
+  code: string
+  title: string
+  subtitle: string
+  accent: string
+  onClick: () => void
+}
+
 export default function Home({
-  onAuditClick,
   onHistoryClick,
   onMachineClick,
   onProductClick,
   onInboundClick,
+  onAdjustmentClick,
   onLineBotClick,
 }: Props) {
+  const todayText = getTaipeiDisplayDate()
+  const businessDateText = getBusinessDateText()
+
+  const actionCards: ActionCard[] = [
+    {
+      code: "PRD",
+      title: "商品管理",
+      subtitle: "新增 / 編輯 / 啟用",
+      accent: "#66a9ff",
+      onClick: onProductClick,
+    },
+    {
+      code: "ADJ",
+      title: "異動單",
+      subtitle: "補入庫 / 補出庫",
+      accent: "#74d6ff",
+      onClick: onAdjustmentClick,
+    },
+    {
+      code: "MAC",
+      title: "機台管理",
+      subtitle: "配置 / 生命週期",
+      accent: "#8bdbb5",
+      onClick: onMachineClick,
+    },
+    {
+      code: "BOT",
+      title: "LINE Bot",
+      subtitle: "記錄 / 查詢 / 取消",
+      accent: "#b9a7ff",
+      onClick: onLineBotClick,
+    },
+  ]
+
   return (
-    <div style={pageStyle}>
-      <div style={headerStyle}>
-        <h1 style={titleStyle}>CatchMe 管理系統</h1>
-        <p style={subtitleStyle}>CatchMe Machine</p>
-      </div>
+    <main style={pageStyle}>
+      <section style={heroStyle}>
+        <div>
+          <div style={storeLabelStyle}>嘉義航母店</div>
+          <h1 style={titleStyle}>營運控制台</h1>
+        </div>
 
-      <div style={sectionListStyle}>
-        <section style={sectionStyle}>
-          <div style={sectionTitleStyle}>商品管理</div>
-          <button style={primaryButtonStyle} onClick={onProductClick}>
-            新增 / 編輯商品
-          </button>
-        </section>
+        <div style={dateBlockStyle}>
+          <div style={dateTextStyle}>{todayText}</div>
+          <div style={bizDateStyle}>業務日：{businessDateText}</div>
+        </div>
+      </section>
 
-        <section style={sectionStyle}>
-          <div style={sectionTitleStyle}>倉庫管理</div>
-          <button style={secondaryButtonStyle} onClick={onInboundClick}>
-            入庫
-          </button>
-        </section>
+      <section style={summaryCardStyle}>
+        <div style={summaryGlowStyle} />
+        <div style={summaryHeaderStyle}>
+          <span style={summaryLabelStyle}>庫存</span>
+          <span style={summaryValueStyle}>--</span>
+        </div>
 
-        <section style={sectionStyle}>
-          <div style={sectionTitleStyle}>機台管理</div>
-          <button style={secondaryButtonStyle} onClick={onMachineClick}>
-            機台生命週期
-          </button>
-          <button style={secondaryButtonStyle} onClick={onAuditClick}>
-            今日盤點
-          </button>
-          <button style={secondaryButtonStyle} onClick={onHistoryClick}>
-            歷史紀錄
-          </button>
-        </section>
+        <div style={metricGridStyle}>
+          <div style={metricCellStyle}>
+            <span style={metricLabelStyle}>入庫</span>
+            <strong style={metricValueStyle}>--</strong>
+          </div>
+          <div style={metricDividerStyle} />
+          <div style={metricCellStyle}>
+            <span style={metricLabelStyle}>出庫</span>
+            <strong style={metricValueStyle}>--</strong>
+          </div>
+        </div>
+      </section>
 
-        <section style={sectionStyle}>
-          <div style={sectionTitleStyle}>LINE Bot</div>
-          <button style={secondaryButtonStyle} onClick={onLineBotClick}>
-            記錄 / 查詢 / 取消
-          </button>
-        </section>
-      </div>
+      <section style={sectionHeaderStyle}>
+        <h2 style={sectionTitleStyle}>快捷功能</h2>
+        <button style={textButtonStyle} onClick={onHistoryClick}>
+          歷史
+        </button>
+      </section>
 
-      <div style={footerStyle}>v1.1.0</div>
-    </div>
+      <section style={actionListStyle}>
+        {actionCards.map((card) => (
+          <button key={card.code} style={actionCardStyle} onClick={card.onClick}>
+            <span
+              style={{
+                ...iconBoxStyle,
+                borderColor: `${card.accent}55`,
+                boxShadow: `0 0 30px ${card.accent}1f`,
+              }}
+            >
+              <span style={{ ...iconCodeStyle, color: card.accent }}>
+                {card.code}
+              </span>
+            </span>
+
+            <span style={actionTextStyle}>
+              <span style={actionTitleStyle}>{card.title}</span>
+              <span style={actionSubtitleStyle}>{card.subtitle}</span>
+            </span>
+
+            <span style={{ ...arrowStyle, color: card.accent }}>→</span>
+          </button>
+        ))}
+      </section>
+
+      <section style={sectionHeaderStyle}>
+        <h2 style={sectionTitleStyle}>交易記錄</h2>
+        <button style={textButtonStyle} onClick={onHistoryClick}>
+          檢視全部
+        </button>
+      </section>
+
+      <button style={primaryCtaStyle} onClick={onInboundClick}>
+        <span style={ctaIconStyle}>IN</span>
+        <span>入庫</span>
+      </button>
+    </main>
   )
+}
+
+function getTaipeiDisplayDate() {
+  const parts = new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(new Date())
+
+  const year = parts.find((part) => part.type === "year")?.value ?? ""
+  const month = parts.find((part) => part.type === "month")?.value ?? ""
+  const day = parts.find((part) => part.type === "day")?.value ?? ""
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? ""
+
+  return `${year}/${month}/${day}(${weekday})`
+}
+
+function getBusinessDateText() {
+  const now = new Date()
+  const taipeiParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(now)
+
+  const year = taipeiParts.find((part) => part.type === "year")?.value ?? ""
+  const month = taipeiParts.find((part) => part.type === "month")?.value ?? ""
+  const day = taipeiParts.find((part) => part.type === "day")?.value ?? ""
+  const hour = Number(
+    taipeiParts.find((part) => part.type === "hour")?.value ?? "0"
+  )
+
+  const base = new Date(`${year}-${month}-${day}T12:00:00+08:00`)
+  if (hour < 5) base.setDate(base.getDate() - 1)
+
+  const businessYear = base.getFullYear()
+  const businessMonth = String(base.getMonth() + 1).padStart(2, "0")
+  const businessDay = String(base.getDate()).padStart(2, "0")
+
+  return `${businessYear}-${businessMonth}-${businessDay}（05:00切日）`
 }
 
 const pageStyle: CSSProperties = {
   minHeight: "100dvh",
-  background: "#050913",
-  color: "#fafafa",
-  padding: "calc(env(safe-area-inset-top, 0px) + 28px) 18px 28px",
+  width: "100%",
+  maxWidth: "100vw",
+  overflowX: "hidden",
+  background:
+    "radial-gradient(circle at 18% 0%, rgba(56, 189, 248, 0.2), transparent 28%), linear-gradient(180deg, #05070b 0%, #030407 100%)",
+  color: "#f8fafc",
+  padding: "calc(env(safe-area-inset-top, 0px) + 32px) 18px 28px",
   boxSizing: "border-box",
-  fontFamily: "system-ui, -apple-system, sans-serif",
-  display: "flex",
-  flexDirection: "column",
+  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
 }
 
-const headerStyle: CSSProperties = {
-  marginBottom: 24,
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-  textAlign: "left",
+const heroStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 14,
+  alignItems: "end",
+  marginBottom: 22,
+}
+
+const storeLabelStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontSize: 28,
+  lineHeight: 1.1,
+  fontWeight: 950,
+  letterSpacing: 0,
+  marginBottom: 8,
 }
 
 const titleStyle: CSSProperties = {
   margin: 0,
-  fontSize: 30,
-  lineHeight: 1.12,
+  color: "#8dd7ff",
+  fontSize: 14,
+  lineHeight: 1.2,
   fontWeight: 900,
   letterSpacing: 0,
-  color: "#fafafa",
 }
 
-const subtitleStyle: CSSProperties = {
-  margin: 0,
-  color: "#8dd7ff",
+const dateBlockStyle: CSSProperties = {
+  textAlign: "right",
+  minWidth: 138,
+}
+
+const dateTextStyle: CSSProperties = {
+  color: "#e5e7eb",
   fontSize: 16,
+  lineHeight: 1.2,
   fontWeight: 800,
-  letterSpacing: 0,
 }
 
-const sectionListStyle: CSSProperties = {
+const bizDateStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 12,
+  lineHeight: 1.4,
+  fontWeight: 800,
+  marginTop: 6,
+}
+
+const summaryCardStyle: CSSProperties = {
+  position: "relative",
+  overflow: "hidden",
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 28,
+  background:
+    "linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))",
+  boxShadow:
+    "0 24px 60px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.13)",
+  padding: 24,
+  marginBottom: 28,
+}
+
+const summaryGlowStyle: CSSProperties = {
+  position: "absolute",
+  top: -80,
+  right: -70,
+  width: 170,
+  height: 170,
+  borderRadius: "50%",
+  background: "rgba(96, 165, 250, 0.22)",
+  filter: "blur(28px)",
+  pointerEvents: "none",
+}
+
+const summaryHeaderStyle: CSSProperties = {
+  position: "relative",
   display: "flex",
-  flexDirection: "column",
-  gap: 12,
-  flex: 1,
+  alignItems: "baseline",
+  gap: 14,
+  marginBottom: 22,
 }
 
-const sectionStyle: CSSProperties = {
+const summaryLabelStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontSize: 28,
+  lineHeight: 1.1,
+  fontWeight: 950,
+}
+
+const summaryValueStyle: CSSProperties = {
+  color: "#60a5fa",
+  fontSize: 38,
+  lineHeight: 1,
+  fontWeight: 950,
+  textShadow: "0 0 28px rgba(96, 165, 250, 0.36)",
+}
+
+const metricGridStyle: CSSProperties = {
+  position: "relative",
+  display: "grid",
+  gridTemplateColumns: "1fr 1px 1fr",
+  alignItems: "center",
+  gap: 18,
+}
+
+const metricCellStyle: CSSProperties = {
   display: "grid",
   gap: 10,
-  border: "1px solid rgba(148,163,184,0.2)",
-  borderRadius: 8,
-  background: "#0b1220",
-  padding: 12,
+}
+
+const metricLabelStyle: CSSProperties = {
+  color: "#dbeafe",
+  fontSize: 18,
+  lineHeight: 1.2,
+  fontWeight: 900,
+}
+
+const metricValueStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontSize: 32,
+  lineHeight: 1,
+  fontWeight: 950,
+}
+
+const metricDividerStyle: CSSProperties = {
+  width: 1,
+  minHeight: 66,
+  background:
+    "linear-gradient(180deg, transparent, rgba(148,163,184,0.45), transparent)",
+}
+
+const sectionHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 14,
+  margin: "24px 0 12px",
 }
 
 const sectionTitleStyle: CSSProperties = {
-  color: "#cbd5e1",
-  fontSize: 14,
-  fontWeight: 900,
+  margin: 0,
+  color: "#f8fafc",
+  fontSize: 28,
+  lineHeight: 1.1,
+  fontWeight: 950,
+  letterSpacing: 0,
 }
 
-const primaryButtonStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 56,
-  borderRadius: 14,
+const textButtonStyle: CSSProperties = {
   border: "none",
-  background: "#fafafa",
-  color: "#0f172a",
+  background: "transparent",
+  color: "#60a5fa",
   fontSize: 17,
-  fontWeight: 900,
-  cursor: "pointer",
+  fontWeight: 950,
+  padding: 0,
 }
 
-const secondaryButtonStyle: CSSProperties = {
+const actionListStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+}
+
+const actionCardStyle: CSSProperties = {
   width: "100%",
-  minHeight: 54,
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "#101827",
-  color: "#e4e4e7",
-  fontSize: 17,
-  fontWeight: 800,
-  cursor: "pointer",
+  minHeight: 104,
+  display: "grid",
+  gridTemplateColumns: "72px minmax(0, 1fr) 34px",
+  alignItems: "center",
+  gap: 16,
+  border: "1px solid rgba(148,163,184,0.2)",
+  borderRadius: 24,
+  background:
+    "linear-gradient(145deg, rgba(255,255,255,0.09), rgba(255,255,255,0.035))",
+  color: "#f8fafc",
+  padding: "16px 18px",
+  textAlign: "left",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1)",
 }
 
-const footerStyle: CSSProperties = {
-  textAlign: "center",
-  color: "#475569",
+const iconBoxStyle: CSSProperties = {
+  width: 64,
+  height: 64,
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 18,
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(255,255,255,0.08)",
+}
+
+const iconCodeStyle: CSSProperties = {
   fontSize: 13,
-  fontWeight: 700,
-  fontFamily: "monospace",
-  marginTop: "auto",
-  paddingTop: 32,
+  lineHeight: 1,
+  fontWeight: 950,
+  letterSpacing: 0,
+}
+
+const actionTextStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 7,
+}
+
+const actionTitleStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontSize: 23,
+  lineHeight: 1.1,
+  fontWeight: 950,
+}
+
+const actionSubtitleStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 15,
+  lineHeight: 1.25,
+  fontWeight: 850,
+}
+
+const arrowStyle: CSSProperties = {
+  justifySelf: "end",
+  fontSize: 36,
+  lineHeight: 1,
+  fontWeight: 900,
+}
+
+const primaryCtaStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 74,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 16,
+  border: "none",
+  borderRadius: 32,
+  background: "linear-gradient(135deg, #69aafc, #4f8eee)",
+  color: "#ffffff",
+  fontSize: 25,
+  fontWeight: 950,
+  boxShadow: "0 22px 48px rgba(59,130,246,0.32)",
+}
+
+const ctaIconStyle: CSSProperties = {
+  width: 54,
+  height: 54,
+  display: "grid",
+  placeItems: "center",
+  borderRadius: 20,
+  background: "rgba(255,255,255,0.16)",
+  color: "#dbeafe",
+  fontSize: 13,
+  lineHeight: 1,
+  fontWeight: 950,
 }

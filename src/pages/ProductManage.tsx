@@ -8,16 +8,74 @@ type Props = {
 type Product = {
   product_sku: string
   product_name: string
-  enabled: boolean | null
-  barcode?: string
+  units_per_box: number
+  enabled: boolean
+  category: string | null
+  tags: string[]
+  barcodes: ProductBarcode[]
 }
 
-type Mode = "list" | "new" | "edit"
+type ProductBarcode = {
+  id: number
+  barcode: string
+}
+
+type ProductFormValues = {
+  sku: string
+  name: string
+  unitsPerBox: string
+  enabled: boolean
+  tags: string[]
+  newBarcode: string
+}
+
+type ProductRow = {
+  product_sku: string
+  product_name: string | null
+  units_per_box: number | null
+  enabled: boolean | null
+  category: string | null
+  tags: string[] | null
+}
+
+type BarcodeRow = {
+  id: number
+  product_sku: string
+  barcode: string
+}
+
+type Filter = "all" | "enabled" | "disabled"
+type Mode = "list" | "detail"
+
+const TAG_OPTIONS = ["代夾物", "食品", "百貨", "娃娃"]
+
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === "undefined") return false
+    return window.matchMedia("(min-width: 900px)").matches
+  })
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const query = window.matchMedia("(min-width: 900px)")
+    const update = () => setIsDesktop(query.matches)
+
+    update()
+    query.addEventListener("change", update)
+
+    return () => query.removeEventListener("change", update)
+  }, [])
+
+  return isDesktop
+}
 
 export default function ProductManage({ onBack }: Props) {
+  const isDesktop = useIsDesktop()
   const [mode, setMode] = useState<Mode>("list")
   const [products, setProducts] = useState<Product[]>([])
   const [query, setQuery] = useState("")
+  const [filter, setFilter] = useState<Filter>("all")
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -29,16 +87,23 @@ export default function ProductManage({ onBack }: Props) {
 
   const filteredProducts = useMemo(() => {
     const keyword = query.trim().toLowerCase()
-    if (!keyword) return products
 
-    return products.filter((product) => {
-      return (
-        product.product_sku.toLowerCase().includes(keyword) ||
-        product.product_name.toLowerCase().includes(keyword) ||
-        (product.barcode ?? "").toLowerCase().includes(keyword)
-      )
-    })
-  }, [products, query])
+    return products
+      .filter((product) => {
+        if (filter === "enabled" && !product.enabled) return false
+        if (filter === "disabled" && product.enabled) return false
+        if (!keyword) return true
+
+        return (
+          product.product_sku.toLowerCase().includes(keyword) ||
+          product.product_name.toLowerCase().includes(keyword) ||
+          product.barcodes.some((barcode) =>
+            barcode.barcode.toLowerCase().includes(keyword)
+          )
+        )
+      })
+      .slice(0, 10)
+  }, [filter, products, query])
 
   async function loadProducts() {
     try {
@@ -47,43 +112,54 @@ export default function ProductManage({ onBack }: Props) {
 
       const { data: productData, error: productError } = await supabase
         .from("products")
-        .select("product_sku,product_name,enabled")
+        .select("product_sku,product_name,units_per_box,enabled,category,tags")
         .order("product_sku", { ascending: true })
         .limit(200)
 
       if (productError) throw productError
 
-      const skuList = Array.from(
-        new Set((productData ?? []).map((product) => product.product_sku))
-      )
-
-      let barcodeMap = new Map<string, string>()
+      const rows = (productData ?? []) as ProductRow[]
+      const skuList = Array.from(new Set(rows.map((product) => product.product_sku)))
+      let barcodeMap = new Map<string, ProductBarcode[]>()
 
       if (skuList.length > 0) {
         const { data: barcodeData, error: barcodeError } = await supabase
           .from("product_barcodes")
-          .select("product_sku,barcode")
+          .select("id,product_sku,barcode")
           .eq("enabled", true)
           .in("product_sku", skuList)
+          .order("barcode", { ascending: true })
 
         if (barcodeError) throw barcodeError
 
-        barcodeMap = new Map(
-          (barcodeData ?? []).map((row) => [row.product_sku, row.barcode])
-        )
+        barcodeMap = (barcodeData ?? []).reduce((map, row) => {
+          const barcodeRow = row as BarcodeRow
+          const current = map.get(barcodeRow.product_sku) ?? []
+          map.set(barcodeRow.product_sku, [
+            ...current,
+            {
+              id: barcodeRow.id,
+              barcode: barcodeRow.barcode,
+            },
+          ])
+          return map
+        }, new Map<string, ProductBarcode[]>())
       }
 
       setProducts(
-        (productData ?? []).map((product) => ({
+        rows.map((product) => ({
           product_sku: product.product_sku,
           product_name: product.product_name ?? "",
-          enabled: product.enabled ?? null,
-          barcode: barcodeMap.get(product.product_sku),
+          units_per_box: product.units_per_box ?? 0,
+          enabled: product.enabled !== false,
+          category: product.category,
+          tags: product.tags ?? [],
+          barcodes: barcodeMap.get(product.product_sku) ?? [],
         }))
       )
-    } catch (err: any) {
+    } catch (err) {
       console.error(err)
-      setError(err.message ?? "商品讀取失敗")
+      setError(err instanceof Error ? err.message : "商品讀取失敗")
     } finally {
       setLoading(false)
     }
@@ -91,350 +167,1119 @@ export default function ProductManage({ onBack }: Props) {
 
   function openNewForm() {
     setSelectedProduct(null)
-    setMode("new")
+    setMode("detail")
     setMessage("")
     setError("")
   }
 
-  function openEditForm(product: Product) {
+  function openDetail(product: Product) {
     setSelectedProduct(product)
-    setMode("edit")
+    setMode("detail")
     setMessage("")
     setError("")
   }
 
-  function showPendingMessage() {
-    setMessage("資料庫寫入等 UI 動線確認後再接上")
+  function closeDetail() {
+    setSelectedProduct(null)
+    setMode("list")
+  }
+
+  async function saveProduct(product: Product | null, values: ProductFormValues) {
+    try {
+      setError("")
+      setMessage("")
+
+      const sku = values.sku.trim().toLowerCase()
+      const productName = values.name.trim()
+      const unitsPerBox = Number(values.unitsPerBox)
+      const newBarcode = values.newBarcode.trim()
+
+      if (!sku) throw new Error("請輸入 SKU")
+      if (!productName) throw new Error("請輸入品名")
+      if (!Number.isInteger(unitsPerBox) || unitsPerBox <= 0) {
+        throw new Error("箱入數必須是大於 0 的整數")
+      }
+
+      if (!product) {
+        const { data: existingProduct, error: checkError } = await supabase
+          .from("products")
+          .select("product_sku")
+          .eq("product_sku", sku)
+          .maybeSingle()
+
+        if (checkError) throw checkError
+        if (existingProduct) throw new Error("這個 SKU 已存在，請換一個")
+
+        const { error: insertError } = await supabase.from("products").insert({
+          product_sku: sku,
+          product_name: productName,
+          units_per_box: unitsPerBox,
+          enabled: values.enabled,
+          tags: values.tags,
+          category: null,
+        })
+
+        if (insertError) throw insertError
+      } else {
+        const { error: updateError } = await supabase
+          .from("products")
+          .update({
+            product_name: productName,
+            units_per_box: unitsPerBox,
+            enabled: values.enabled,
+            tags: values.tags,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("product_sku", product.product_sku)
+
+        if (updateError) throw updateError
+      }
+
+      if (newBarcode) {
+        const { error: barcodeError } = await supabase.from("product_barcodes").insert({
+          product_sku: product?.product_sku ?? sku,
+          barcode: newBarcode,
+          enabled: true,
+        })
+
+        if (barcodeError) throw barcodeError
+      }
+
+      await loadProducts()
+      setMessage(product ? "商品已儲存" : "商品已新增")
+      closeDetail()
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "商品儲存失敗")
+    }
+  }
+
+  async function deleteProduct(product: Product) {
+    try {
+      setError("")
+      setMessage("")
+
+      const { error: barcodeError } = await supabase
+        .from("product_barcodes")
+        .delete()
+        .eq("product_sku", product.product_sku)
+
+      if (barcodeError) throw barcodeError
+
+      const { error: productError } = await supabase
+        .from("products")
+        .delete()
+        .eq("product_sku", product.product_sku)
+
+      if (productError) throw productError
+
+      await loadProducts()
+      setMessage("商品已刪除")
+      closeDetail()
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "商品刪除失敗")
+    }
+  }
+
+  async function deleteBarcode(barcodeId: number) {
+    try {
+      setError("")
+      setMessage("")
+
+      const { error: barcodeError } = await supabase
+        .from("product_barcodes")
+        .delete()
+        .eq("id", barcodeId)
+
+      if (barcodeError) throw barcodeError
+
+      setSelectedProduct((current) =>
+        current
+          ? {
+              ...current,
+              barcodes: current.barcodes.filter((barcode) => barcode.id !== barcodeId),
+            }
+          : current
+      )
+      setProducts((current) =>
+        current.map((product) => ({
+          ...product,
+          barcodes: product.barcodes.filter((barcode) => barcode.id !== barcodeId),
+        }))
+      )
+      setMessage("條碼已刪除")
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "條碼刪除失敗")
+    }
   }
 
   return (
-    <div style={pageStyle}>
-      <div style={topBarStyle}>
-        <button onClick={onBack} style={iconButtonStyle}>
-          ←
-        </button>
-        <div style={titleBlockStyle}>
-          <div style={eyebrowStyle}>商品管理</div>
-          <h1 style={titleStyle}>
-            {mode === "list" ? "商品列表" : mode === "new" ? "新增商品" : "編輯商品"}
-          </h1>
-        </div>
-        <button onClick={loadProducts} style={iconButtonStyle}>
-          ↻
-        </button>
-      </div>
-
+    <main style={{ ...pageStyle, ...(isDesktop ? desktopPageStyle : {}) }}>
       {message && <div style={messageStyle}>{message}</div>}
       {error && <div style={errorStyle}>{error}</div>}
 
       {mode === "list" && (
         <>
-          <button onClick={openNewForm} style={primaryButtonStyle}>
-            新增商品
-          </button>
+          <header style={{ ...topBarStyle, ...(isDesktop ? desktopTopBarStyle : {}) }}>
+            <button
+              aria-label="返回首頁"
+              onClick={onBack}
+              style={{
+                ...ghostButtonStyle,
+                ...(isDesktop ? desktopGhostButtonStyle : {}),
+              }}
+            >
+              &lt;
+            </button>
 
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜尋貨品編號、名稱、條碼"
-            style={searchInputStyle}
-          />
+            {isDesktop && (
+              <div style={desktopHeadingStyle}>
+                <div style={desktopEyebrowStyle}>PRODUCT DATABASE</div>
+                <h1 style={desktopTitleStyle}>商品管理</h1>
+                <p style={desktopDescriptionStyle}>
+                  管理商品啟用狀態、箱入數、條碼與分類標籤。
+                </p>
+              </div>
+            )}
 
-          {loading && <div style={emptyStyle}>載入中...</div>}
+            <button
+              aria-label="新增商品"
+              onClick={openNewForm}
+              style={{
+                ...addButtonStyle,
+                ...(isDesktop ? desktopAddButtonStyle : {}),
+              }}
+            >
+              {isDesktop ? "新增商品" : "+"}
+            </button>
+          </header>
+
+          <div style={{ ...(isDesktop ? desktopToolbarStyle : {}) }}>
+            <label
+              style={{
+                ...searchWrapStyle,
+                ...(isDesktop ? desktopSearchWrapStyle : {}),
+              }}
+            >
+              <span style={searchIconStyle}>⌕</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜尋 sku / 品名 / 條碼（最多顯示 10 筆）"
+                style={{
+                  ...searchInputStyle,
+                  ...(isDesktop ? desktopSearchInputStyle : {}),
+                }}
+              />
+            </label>
+
+            <div
+              style={{
+                ...filterRowStyle,
+                ...(isDesktop ? desktopFilterRowStyle : {}),
+              }}
+            >
+              <FilterChip active={filter === "all"} onClick={() => setFilter("all")}>
+                全部
+              </FilterChip>
+              <FilterChip active={filter === "enabled"} onClick={() => setFilter("enabled")}>
+                啟用
+              </FilterChip>
+              <FilterChip active={filter === "disabled"} onClick={() => setFilter("disabled")}>
+                停用
+              </FilterChip>
+            </div>
+          </div>
+
+          {loading && <div style={emptyStyle}>商品資料載入中...</div>}
 
           {!loading && (
-            <div style={listStyle}>
+            <section style={{ ...listStyle, ...(isDesktop ? desktopListStyle : {}) }}>
               {filteredProducts.map((product) => (
                 <button
                   key={product.product_sku}
-                  onClick={() => openEditForm(product)}
-                  style={productCardStyle}
+                  onClick={() => openDetail(product)}
+                  style={{
+                    ...productCardStyle,
+                    ...(isDesktop ? desktopProductCardStyle : {}),
+                  }}
                 >
-                  <div style={cardHeaderStyle}>
-                    <span style={skuStyle}>{product.product_sku}</span>
-                    <span
-                      style={{
-                        ...statusStyle,
-                        color: product.enabled === false ? "#fca5a5" : "#86efac",
-                      }}
-                    >
-                      {product.enabled === false ? "停用" : "啟用"}
-                    </span>
-                  </div>
+                  <span
+                    style={{
+                      ...statusDotStyle,
+                      background: product.enabled ? "#16c765" : "#64748b",
+                      boxShadow: product.enabled
+                        ? "0 0 0 7px rgba(22,199,101,0.12)"
+                        : "0 0 0 7px rgba(100,116,139,0.12)",
+                    }}
+                  />
+                  <div style={skuStyle}>{product.product_sku}</div>
                   <div style={nameStyle}>{product.product_name || "未命名商品"}</div>
-                  {product.barcode && <div style={metaStyle}>條碼 {product.barcode}</div>}
+
+                  <div style={metricGridStyle}>
+                    <div style={metricBoxStyle}>
+                      <div style={metricLabelStyle}>箱入數</div>
+                      <div style={metricValueStyle}>
+                        {product.units_per_box || "-"}
+                      </div>
+                    </div>
+                    <div style={metricBoxStyle}>
+                      <div style={metricLabelStyle}>條碼</div>
+                      <div style={barcodeValueStyle}>
+                        {product.barcodes[0]?.barcode ?? "-"}
+                      </div>
+                    </div>
+                  </div>
                 </button>
               ))}
 
               {filteredProducts.length === 0 && (
                 <div style={emptyStyle}>沒有符合的商品</div>
               )}
-            </div>
+            </section>
           )}
         </>
       )}
 
-      {mode !== "list" && (
-        <ProductForm
+      {mode === "detail" && (
+        <ProductDetail
+          isDesktop={isDesktop}
           product={selectedProduct}
-          onCancel={() => setMode("list")}
-          onSubmit={showPendingMessage}
+          onCancel={closeDetail}
+          onDeleteBarcode={deleteBarcode}
+          onDeleteProduct={deleteProduct}
+          onSubmit={saveProduct}
         />
       )}
-    </div>
+    </main>
   )
 }
 
-function ProductForm({
+function FilterChip({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean
+  children: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        ...filterChipStyle,
+        background: active ? "#5aa2ff" : "rgba(255,255,255,0.06)",
+        borderColor: active ? "#5aa2ff" : "rgba(255,255,255,0.13)",
+        color: active ? "#ffffff" : "#f4f7fb",
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ProductDetail({
+  isDesktop,
   product,
   onCancel,
+  onDeleteBarcode,
+  onDeleteProduct,
   onSubmit,
 }: {
+  isDesktop: boolean
   product: Product | null
   onCancel: () => void
-  onSubmit: () => void
+  onDeleteBarcode: (barcodeId: number) => Promise<void>
+  onDeleteProduct: (product: Product) => Promise<void>
+  onSubmit: (product: Product | null, values: ProductFormValues) => Promise<void>
 }) {
   const [sku, setSku] = useState(product?.product_sku ?? "")
   const [name, setName] = useState(product?.product_name ?? "")
-  const [barcode, setBarcode] = useState(product?.barcode ?? "")
-  const [enabled, setEnabled] = useState(product?.enabled !== false)
+  const [unitsPerBox, setUnitsPerBox] = useState(
+    product?.units_per_box ? String(product.units_per_box) : ""
+  )
+  const [enabled, setEnabled] = useState(product?.enabled ?? true)
+  const [selectedTags, setSelectedTags] = useState<string[]>(product?.tags ?? [])
+  const [newBarcode, setNewBarcode] = useState("")
+  const [skuStatus, setSkuStatus] = useState<
+    "idle" | "checking" | "available" | "taken"
+  >("idle")
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (product) return
+
+    const normalizedSku = sku.trim().toLowerCase()
+    if (!normalizedSku) {
+      setSkuStatus("idle")
+      return
+    }
+
+    let cancelled = false
+    setSkuStatus("checking")
+
+    const timer = window.setTimeout(async () => {
+      const { data, error } = await supabase
+        .from("products")
+        .select("product_sku")
+        .eq("product_sku", normalizedSku)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      if (error) {
+        setSkuStatus("idle")
+        return
+      }
+
+      setSkuStatus(data ? "taken" : "available")
+    }, 350)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [product, sku])
+
+  function toggleTag(tag: string) {
+    setSelectedTags((current) =>
+      current.includes(tag)
+        ? current.filter((currentTag) => currentTag !== tag)
+        : [...current, tag]
+    )
+  }
+
+  async function handleSubmit() {
+    try {
+      setBusy(true)
+      await onSubmit(product, {
+        sku,
+        name,
+        unitsPerBox,
+        enabled,
+        tags: selectedTags,
+        newBarcode,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDeleteProduct() {
+    if (!product) return
+    const confirmed = window.confirm(`確定要刪除商品 ${product.product_sku}？`)
+    if (!confirmed) return
+
+    try {
+      setBusy(true)
+      await onDeleteProduct(product)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDeleteBarcode(barcode: ProductBarcode) {
+    const confirmed = window.confirm(`確定要刪除條碼 ${barcode.barcode}？`)
+    if (!confirmed) return
+
+    try {
+      setBusy(true)
+      await onDeleteBarcode(barcode.id)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const canSave =
+    !busy &&
+    Boolean(sku.trim()) &&
+    Boolean(name.trim()) &&
+    Boolean(unitsPerBox.trim()) &&
+    (Boolean(product) || skuStatus === "available")
+
+  const skuStatusText = product
+    ? "商品建立後 SKU 不可修改"
+    : skuStatus === "checking"
+      ? "檢查 SKU 中..."
+      : skuStatus === "available"
+        ? "此 SKU 可使用"
+        : skuStatus === "taken"
+          ? "此 SKU 已存在"
+          : "輸入後會自動檢查是否可用"
 
   return (
-    <div style={formStyle}>
-      <label style={labelStyle}>貨品編號</label>
-      <input
-        value={sku}
-        onChange={(event) => setSku(event.target.value)}
-        style={inputStyle}
-        placeholder="例如 ac066"
-      />
+    <section style={{ ...detailShellStyle, ...(isDesktop ? desktopDetailShellStyle : {}) }}>
+      <div style={{ ...detailPanelStyle, ...(isDesktop ? desktopDetailPanelStyle : {}) }}>
+        <div style={{ ...detailHeaderStyle, ...(isDesktop ? desktopDetailHeaderStyle : {}) }}>
+          <h1 style={detailTitleStyle}>
+            商品詳情：{product?.product_sku || "新增"}
+          </h1>
+          <button aria-label="關閉" onClick={onCancel} style={closeButtonStyle}>
+            ×
+          </button>
+        </div>
 
-      <label style={labelStyle}>貨品名稱</label>
-      <input
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        style={inputStyle}
-        placeholder="商品名稱"
-      />
+        <div style={isDesktop ? desktopFormGridStyle : undefined}>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>sku（必填、強制 lowercase）</span>
+            <input
+              value={sku}
+              onChange={(event) => setSku(event.target.value.toLowerCase())}
+              placeholder="0330-1"
+              style={{
+                ...inputStyle,
+                ...(isDesktop ? desktopInputStyle : {}),
+                opacity: product ? 0.52 : 1,
+              }}
+              disabled={Boolean(product)}
+            />
+            <span
+              style={{
+                ...hintStyle,
+                color:
+                  !product && skuStatus === "available"
+                    ? "#86efac"
+                    : !product && skuStatus === "taken"
+                      ? "#ff6666"
+                      : "#999",
+              }}
+            >
+              {skuStatusText}
+            </span>
+          </label>
 
-      <label style={labelStyle}>條碼</label>
-      <input
-        value={barcode}
-        onChange={(event) => setBarcode(event.target.value)}
-        style={inputStyle}
-        placeholder="可留空"
-      />
+          <label style={fieldStyle}>
+            <span style={labelStyle}>品名（必填）</span>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="商品名稱"
+              style={{
+                ...inputStyle,
+                ...(isDesktop ? desktopInputStyle : {}),
+              }}
+            />
+          </label>
 
-      <label style={checkRowStyle}>
-        <input
-          checked={enabled}
-          onChange={(event) => setEnabled(event.target.checked)}
-          type="checkbox"
-        />
-        啟用商品
-      </label>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>箱入數（必填）</span>
+            <input
+              inputMode="numeric"
+              value={unitsPerBox}
+              onChange={(event) => setUnitsPerBox(event.target.value)}
+              placeholder="480"
+              style={{
+                ...inputStyle,
+                ...(isDesktop ? desktopInputStyle : {}),
+              }}
+            />
+          </label>
 
-      <div style={actionRowStyle}>
-        <button onClick={onCancel} style={secondaryButtonStyle}>
-          取消
-        </button>
-        <button onClick={onSubmit} style={primaryButtonStyle}>
-          儲存
-        </button>
+          <label style={{ ...enabledRowStyle, ...(isDesktop ? desktopEnabledRowStyle : {}) }}>
+            <input
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+              style={checkboxStyle}
+              type="checkbox"
+            />
+            <span>啟用</span>
+          </label>
+        </div>
+
+        <div style={fieldStyle}>
+          <div style={labelStyle}>標籤（可複選）</div>
+          <div style={tagRowStyle}>
+            {TAG_OPTIONS.map((tag) => {
+              const active = selectedTags.includes(tag)
+              return (
+                <button
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  style={{
+                    ...tagButtonStyle,
+                    background: active ? "#5aa2ff" : "rgba(255,255,255,0.07)",
+                    borderColor: active ? "#5aa2ff" : "rgba(255,255,255,0.15)",
+                  }}
+                >
+                  {tag}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <label style={fieldStyle}>
+          <span style={labelStyle}>新增條碼（選填）</span>
+          <input
+            value={newBarcode}
+            onChange={(event) => setNewBarcode(event.target.value)}
+            placeholder="掃描或輸入條碼"
+            style={{
+              ...inputStyle,
+              ...(isDesktop ? desktopInputStyle : {}),
+            }}
+          />
+        </label>
+
+        <div style={boundBoxStyle}>
+          <div style={boundTitleStyle}>已綁定條碼</div>
+          {product?.barcodes.length ? (
+            <div style={barcodeListStyle}>
+              {product.barcodes.map((barcode) => (
+                <div key={barcode.id} style={barcodeRowStyle}>
+                  <span style={boundBarcodeStyle}>{barcode.barcode}</span>
+                  <button
+                    disabled={busy}
+                    onClick={() => handleDeleteBarcode(barcode)}
+                    style={smallDangerButtonStyle}
+                  >
+                    刪除
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={boundEmptyStyle}>目前沒有條碼</div>
+          )}
+        </div>
+
+        {product && (
+          <button
+            disabled={busy}
+            onClick={handleDeleteProduct}
+            style={dangerButtonStyle}
+          >
+            刪除商品
+          </button>
+        )}
+
+        <div style={actionRowStyle}>
+          <button onClick={onCancel} style={secondaryButtonStyle}>
+            取消
+          </button>
+          <button
+            disabled={!canSave}
+            onClick={handleSubmit}
+            style={{
+              ...primaryButtonStyle,
+              opacity: canSave ? 1 : 0.45,
+            }}
+          >
+            {busy ? "處理中..." : "儲存"}
+          </button>
+        </div>
       </div>
-    </div>
+    </section>
   )
 }
 
 const pageStyle: CSSProperties = {
   minHeight: "100dvh",
-  background: "#050913",
+  background: "#0f0f0f",
   color: "#fff",
-  padding: "calc(env(safe-area-inset-top, 0px) + 12px) 14px 28px",
+  padding: "calc(env(safe-area-inset-top, 0px) + 44px) 16px 24px",
   boxSizing: "border-box",
-  fontFamily: "system-ui, -apple-system, sans-serif",
+  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+}
+
+const desktopPageStyle: CSSProperties = {
+  padding: "44px 24px 32px",
 }
 
 const topBarStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "44px minmax(0, 1fr) 44px",
+  display: "flex",
   alignItems: "center",
-  gap: 8,
-  marginBottom: 16,
+  justifyContent: "space-between",
+  maxWidth: 520,
+  margin: "0 auto 20px",
 }
 
-const iconButtonStyle: CSSProperties = {
-  width: 44,
-  height: 44,
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.08)",
+const desktopTopBarStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "72px minmax(0, 1fr) 120px",
+  gap: 16,
+  maxWidth: 1120,
+  margin: "0 auto 20px",
+}
+
+const desktopHeadingStyle: CSSProperties = {
+  minWidth: 0,
+}
+
+const desktopEyebrowStyle: CSSProperties = {
+  color: "#999",
+  fontSize: 12,
+}
+
+const desktopTitleStyle: CSSProperties = {
+  margin: "4px 0 0",
+  color: "#fff",
+  fontSize: 22,
+  fontWeight: 700,
+  lineHeight: 1.2,
+}
+
+const desktopDescriptionStyle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#999",
+  fontSize: 14,
+}
+
+const ghostButtonStyle: CSSProperties = {
+  background: "transparent",
+  color: "#fff",
+  border: "none",
+  fontSize: 18,
+  padding: 0,
+}
+
+const desktopGhostButtonStyle: CSSProperties = {
+  height: 40,
+  border: "1px solid #333",
+  borderRadius: 12,
+  background: "#1a1a1a",
+}
+
+const addButtonStyle: CSSProperties = {
+  background: "transparent",
+  color: "#5aa2ff",
+  border: "none",
+  fontSize: 28,
+  fontWeight: 700,
+  padding: 0,
+}
+
+const desktopAddButtonStyle: CSSProperties = {
+  width: "100%",
+  height: 40,
+  borderRadius: 12,
+  border: "none",
+  background: "#fff",
+  color: "#111",
+  fontSize: 15,
+  fontWeight: 700,
+}
+
+const desktopToolbarStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 1120,
+  margin: "0 auto 18px",
+  display: "grid",
+  gridTemplateColumns: "minmax(280px, 1fr) auto",
+  gap: 12,
+  alignItems: "center",
+}
+
+const searchWrapStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  height: 46,
+  margin: "0 auto 14px",
+  display: "flex",
+  alignItems: "center",
+  borderRadius: 12,
+  border: "1px solid #444",
+  background: "#0f0f0f",
+}
+
+const desktopSearchWrapStyle: CSSProperties = {
+  maxWidth: "none",
+  margin: 0,
+}
+
+const searchIconStyle: CSSProperties = {
+  width: 38,
+  color: "#999",
+  textAlign: "center",
+  fontSize: 18,
+}
+
+const searchInputStyle: CSSProperties = {
+  minWidth: 0,
+  width: "100%",
+  height: "100%",
+  border: "none",
+  outline: "none",
+  background: "transparent",
+  color: "#fff",
+  fontSize: 16,
+}
+
+const desktopSearchInputStyle: CSSProperties = {
+  fontSize: 15,
+}
+
+const filterRowStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  margin: "0 auto 20px",
+  display: "flex",
+  gap: 10,
+}
+
+const desktopFilterRowStyle: CSSProperties = {
+  width: "auto",
+  maxWidth: "none",
+  margin: 0,
+  justifyContent: "flex-end",
+}
+
+const filterChipStyle: CSSProperties = {
+  minWidth: 64,
+  height: 38,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid",
+  fontSize: 15,
+  fontWeight: 700,
+}
+
+const listStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  margin: "0 auto",
+  display: "grid",
+  gap: 14,
+}
+
+const desktopListStyle: CSSProperties = {
+  maxWidth: 1120,
+  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+}
+
+const productCardStyle: CSSProperties = {
+  position: "relative",
+  width: "100%",
+  border: "1px solid #333",
+  borderRadius: 16,
+  background: "#1a1a1a",
+  color: "#fff",
+  padding: 16,
+  textAlign: "left",
+}
+
+const desktopProductCardStyle: CSSProperties = {
+  minHeight: 150,
+}
+
+const statusDotStyle: CSSProperties = {
+  position: "absolute",
+  top: 18,
+  right: 18,
+  width: 12,
+  height: 12,
+  borderRadius: 999,
+}
+
+const skuStyle: CSSProperties = {
+  maxWidth: "calc(100% - 30px)",
+  overflowWrap: "anywhere",
+  color: "#fff",
+  fontSize: 18,
+  fontWeight: 700,
+  lineHeight: 1.2,
+  letterSpacing: 0,
+}
+
+const nameStyle: CSSProperties = {
+  marginTop: 6,
+  color: "#ddd",
+  fontSize: 15,
+  fontWeight: 700,
+  lineHeight: 1.35,
+  overflowWrap: "anywhere",
+}
+
+const metricGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  gap: 10,
+  marginTop: 14,
+}
+
+const metricBoxStyle: CSSProperties = {
+  minWidth: 0,
+  border: "1px solid #333",
+  borderRadius: 12,
+  background: "#0f0f0f",
+  padding: "10px 12px",
+  boxSizing: "border-box",
+}
+
+const metricLabelStyle: CSSProperties = {
+  color: "#bbb",
+  fontSize: 13,
+}
+
+const metricValueStyle: CSSProperties = {
+  marginTop: 6,
+  color: "#fff",
+  fontSize: 18,
+  fontWeight: 700,
+  lineHeight: 1.2,
+}
+
+const barcodeValueStyle: CSSProperties = {
+  ...metricValueStyle,
+  fontSize: 15,
+  overflowWrap: "anywhere",
+}
+
+const detailShellStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  margin: "0 auto",
+}
+
+const desktopDetailShellStyle: CSSProperties = {
+  maxWidth: 900,
+}
+
+const detailPanelStyle: CSSProperties = {
+  border: "1px solid #333",
+  borderRadius: 16,
+  background: "#1a1a1a",
+  padding: 16,
+}
+
+const desktopDetailPanelStyle: CSSProperties = {
+  padding: 20,
+}
+
+const detailHeaderStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 46px",
+  alignItems: "center",
+  gap: 12,
+  marginBottom: 20,
+}
+
+const desktopDetailHeaderStyle: CSSProperties = {
+  gridTemplateColumns: "minmax(0, 1fr) 46px",
+}
+
+const detailTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#fff",
+  fontSize: 20,
+  fontWeight: 700,
+  lineHeight: 1.2,
+  overflowWrap: "anywhere",
+}
+
+const closeButtonStyle: CSSProperties = {
+  width: 46,
+  height: 46,
+  borderRadius: 12,
+  border: "1px solid #444",
+  background: "#222",
   color: "#fff",
   fontSize: 24,
 }
 
-const titleBlockStyle: CSSProperties = {
-  textAlign: "center",
-  minWidth: 0,
-}
-
-const eyebrowStyle: CSSProperties = {
-  color: "#8dd7ff",
-  fontSize: 13,
-  fontWeight: 800,
-  marginBottom: 2,
-}
-
-const titleStyle: CSSProperties = {
-  margin: 0,
-  color: "#fff",
-  fontSize: 26,
-  fontWeight: 900,
-  lineHeight: 1.1,
-}
-
-const primaryButtonStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 54,
-  border: "none",
-  borderRadius: 14,
-  background: "#f8fafc",
-  color: "#0f172a",
-  fontSize: 17,
-  fontWeight: 800,
-}
-
-const secondaryButtonStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 54,
-  border: "1px solid rgba(255,255,255,0.16)",
-  borderRadius: 14,
-  background: "rgba(255,255,255,0.08)",
-  color: "#e2e8f0",
-  fontSize: 17,
-  fontWeight: 800,
-}
-
-const searchInputStyle: CSSProperties = {
-  width: "100%",
-  height: 52,
-  marginTop: 14,
+const fieldStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
   marginBottom: 14,
-  borderRadius: 14,
-  border: "1px solid #334155",
-  background: "#101827",
-  color: "#fff",
-  padding: "0 14px",
-  fontSize: 16,
 }
 
-const listStyle: CSSProperties = {
+const desktopFormGridStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
-}
-
-const productCardStyle: CSSProperties = {
-  width: "100%",
-  textAlign: "left",
-  border: "1px solid rgba(148,163,184,0.22)",
-  borderRadius: 8,
-  background: "#0b1220",
-  color: "#fff",
-  padding: 14,
-}
-
-const cardHeaderStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  alignItems: "center",
-}
-
-const skuStyle: CSSProperties = {
-  color: "#93c5fd",
-  fontSize: 13,
-  fontWeight: 900,
-}
-
-const statusStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 900,
-}
-
-const nameStyle: CSSProperties = {
-  marginTop: 8,
-  fontSize: 18,
-  fontWeight: 800,
-  lineHeight: 1.25,
-}
-
-const metaStyle: CSSProperties = {
-  marginTop: 8,
-  color: "#94a3b8",
-  fontSize: 13,
-}
-
-const emptyStyle: CSSProperties = {
-  border: "1px dashed rgba(148,163,184,0.28)",
-  borderRadius: 8,
-  color: "#94a3b8",
-  padding: 18,
-  textAlign: "center",
-}
-
-const formStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  columnGap: 14,
 }
 
 const labelStyle: CSSProperties = {
-  marginTop: 8,
-  color: "#cbd5e1",
+  color: "#bbb",
   fontSize: 14,
-  fontWeight: 800,
+}
+
+const hintStyle: CSSProperties = {
+  fontSize: 13,
 }
 
 const inputStyle: CSSProperties = {
   width: "100%",
-  height: 52,
-  borderRadius: 14,
-  border: "1px solid #334155",
-  background: "#101827",
+  minWidth: 0,
+  height: 46,
+  borderRadius: 12,
+  border: "1px solid #444",
+  outline: "none",
+  background: "#0f0f0f",
   color: "#fff",
-  padding: "0 14px",
+  padding: "0 12px",
+  boxSizing: "border-box",
+  fontSize: 18,
+}
+
+const desktopInputStyle: CSSProperties = {
   fontSize: 16,
 }
 
-const checkRowStyle: CSSProperties = {
-  minHeight: 48,
+const enabledRowStyle: CSSProperties = {
+  minHeight: 46,
   display: "flex",
   alignItems: "center",
   gap: 10,
-  color: "#e2e8f0",
-  fontWeight: 800,
+  color: "#fff",
+  fontSize: 16,
+  fontWeight: 700,
+  marginBottom: 14,
+}
+
+const desktopEnabledRowStyle: CSSProperties = {
+  border: "1px solid #333",
+  borderRadius: 12,
+  background: "#0f0f0f",
+  padding: "0 12px",
+  boxSizing: "border-box",
+}
+
+const checkboxStyle: CSSProperties = {
+  width: 22,
+  height: 22,
+  accentColor: "#2f9bff",
+}
+
+const tagRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+}
+
+const tagButtonStyle: CSSProperties = {
+  minWidth: 72,
+  height: 40,
+  borderRadius: 12,
+  border: "1px solid",
+  color: "#fff",
+  fontSize: 14,
+  fontWeight: 700,
+}
+
+const boundBoxStyle: CSSProperties = {
+  border: "1px solid #333",
+  borderRadius: 12,
+  background: "#0f0f0f",
+  padding: 14,
+  marginBottom: 20,
+}
+
+const boundTitleStyle: CSSProperties = {
+  color: "#fff",
+  fontSize: 16,
+  fontWeight: 700,
+  marginBottom: 10,
+}
+
+const barcodeListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+}
+
+const barcodeRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 58px",
+  gap: 8,
+  alignItems: "center",
+}
+
+const boundBarcodeStyle: CSSProperties = {
+  color: "#ddd",
+  fontSize: 14,
+  overflowWrap: "anywhere",
+}
+
+const boundEmptyStyle: CSSProperties = {
+  color: "#999",
+  fontSize: 14,
 }
 
 const actionRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
   gap: 10,
-  marginTop: 12,
+}
+
+const smallDangerButtonStyle: CSSProperties = {
+  height: 34,
+  borderRadius: 10,
+  border: "1px solid rgba(255,102,102,0.35)",
+  background: "rgba(255,102,102,0.12)",
+  color: "#ff9999",
+  fontSize: 13,
+}
+
+const dangerButtonStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 46,
+  borderRadius: 12,
+  border: "1px solid rgba(255,102,102,0.35)",
+  background: "rgba(255,102,102,0.12)",
+  color: "#ff9999",
+  fontSize: 15,
+  fontWeight: 700,
+  marginBottom: 12,
+}
+
+const secondaryButtonStyle: CSSProperties = {
+  minHeight: 54,
+  borderRadius: 16,
+  border: "1px solid #333",
+  background: "#222",
+  color: "#fff",
+  fontSize: 16,
+  fontWeight: 700,
+}
+
+const primaryButtonStyle: CSSProperties = {
+  minHeight: 54,
+  borderRadius: 16,
+  border: "none",
+  background: "#fff",
+  color: "#111",
+  fontSize: 16,
+  fontWeight: 700,
+}
+
+const emptyStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  margin: "0 auto",
+  border: "1px dashed #444",
+  borderRadius: 16,
+  color: "#999",
+  padding: 16,
+  textAlign: "center",
+  boxSizing: "border-box",
+  fontSize: 14,
 }
 
 const messageStyle: CSSProperties = {
-  background: "rgba(16,185,129,0.14)",
-  color: "#86efac",
-  border: "1px solid rgba(16,185,129,0.3)",
-  borderRadius: 8,
+  width: "100%",
+  maxWidth: 520,
+  margin: "0 auto 14px",
+  background: "rgba(90,162,255,0.12)",
+  color: "#bfdbfe",
+  border: "1px solid rgba(90,162,255,0.28)",
+  borderRadius: 12,
   padding: 12,
-  marginBottom: 12,
+  boxSizing: "border-box",
+  fontSize: 14,
 }
 
 const errorStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 520,
+  margin: "0 auto 14px",
   background: "rgba(248,113,113,0.12)",
-  color: "#fca5a5",
-  border: "1px solid rgba(248,113,113,0.3)",
-  borderRadius: 8,
+  color: "#ff6666",
+  border: "1px solid rgba(248,113,113,0.28)",
+  borderRadius: 12,
   padding: 12,
-  marginBottom: 12,
+  boxSizing: "border-box",
+  fontSize: 14,
 }

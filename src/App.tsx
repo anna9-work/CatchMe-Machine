@@ -8,6 +8,7 @@ import MachineManage from "./pages/MachineManage"
 import MachineDetail from "./pages/MachineDetail"
 import ProductManage from "./pages/ProductManage"
 import InboundPage from "./pages/InboundPage"
+import AdjustmentPage from "./pages/AdjustmentPage"
 import LineBotPage from "./pages/LineBotPage"
 import { supabase } from "./lib/supabase"
 
@@ -19,6 +20,7 @@ type Page =
   | "machineDetail"
   | "products"
   | "inbound"
+  | "adjustment"
   | "lineBot"
 
 const GROUP_CODE = "catch_0001"
@@ -107,6 +109,10 @@ function App() {
     return <InboundPage onBack={() => setPage("home")} />
   }
 
+  if (page === "adjustment") {
+    return <AdjustmentPage onBack={() => setPage("home")} />
+  }
+
   if (page === "lineBot") {
     return <LineBotPage onBack={() => setPage("home")} />
   }
@@ -132,6 +138,7 @@ function App() {
         onMachineClick={() => setPage("machines")}
         onProductClick={() => setPage("products")}
         onInboundClick={() => setPage("inbound")}
+        onAdjustmentClick={() => setPage("adjustment")}
         onLineBotClick={() => setPage("lineBot")}
       />
     </>
