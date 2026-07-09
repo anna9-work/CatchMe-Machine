@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { supabase } from "../lib/supabase"
 
 type Props = {
   onBack: () => void
 }
 
-type Mode = "backfill_inbound" | "backfill_outbound"
+type Mode = "backfill_inbound" | "backfill_outbound" | "box2piece"
 
 type Product = {
   product_sku: string
   product_name: string
   units_per_box: number
   tags: string[]
+  stock_box?: number
+  stock_piece?: number
+  stock_amount?: number
 }
 
 type ProductRow = {
@@ -19,6 +22,17 @@ type ProductRow = {
   product_name: string | null
   units_per_box: number | null
   tags: string[] | null
+}
+
+type StockRow = {
+  warehouse_code: string
+  warehouse_name: string
+  product_sku: string
+  product_name: string | null
+  units_per_box: number | null
+  box: number | null
+  piece: number | null
+  amount: number | null
 }
 
 type Warehouse = {
@@ -30,6 +44,7 @@ const GROUP_CODE = "catch_0001"
 const ALLOWED_WAREHOUSES = ["main", "withdraw", "swap"]
 
 export default function AdjustmentPage({ onBack }: Props) {
+  const submittingRef = useRef(false)
   const [mode, setMode] = useState<Mode>("backfill_inbound")
   const [adjustDate, setAdjustDate] = useState(() => getTodayText())
   const [warehouse, setWarehouse] = useState("main")
@@ -69,13 +84,28 @@ export default function AdjustmentPage({ onBack }: Props) {
     return () => window.clearTimeout(timer)
   }, [searchKeyword, searchOpen])
 
+  useEffect(() => {
+    if (mode !== "box2piece" || !product) return
+
+    void refreshSelectedStock(product.product_sku)
+  }, [mode, product?.product_sku, warehouse])
+
   const isInbound = mode === "backfill_inbound"
+  const isOutbound = mode === "backfill_outbound"
+  const isBox2Piece = mode === "box2piece"
   const isFood = useMemo(() => {
     return product?.tags.some((tag) => tag === "食品") ?? false
   }, [product])
 
-  const modeLabel = isInbound ? "補入庫" : "補出庫"
-  const fixedTime = isInbound ? "13:00" : "14:00"
+  const convertedPiece = useMemo(() => {
+    if (!isBox2Piece || !product) return 0
+    const qtyBox = Number(boxQty || "0")
+    if (!Number.isFinite(qtyBox) || qtyBox <= 0) return 0
+    return qtyBox * Number(product.units_per_box || 0)
+  }, [boxQty, isBox2Piece, product])
+
+  const modeLabel = isInbound ? "補入庫" : isOutbound ? "補出庫" : "箱轉散"
+  const fixedTime = isInbound ? "13:00" : isOutbound ? "14:00" : "送出當下"
 
   async function loadWarehouses() {
     const { data, error: warehouseError } = await supabase
@@ -108,6 +138,11 @@ export default function AdjustmentPage({ onBack }: Props) {
   }
 
   async function searchProductOptions(searchValue = searchKeyword) {
+    if (mode === "box2piece") {
+      await searchStockProductOptions(searchValue)
+      return
+    }
+
     const value = searchValue.trim()
     if (!value) {
       setError("請輸入 SKU、關鍵字或條碼")
@@ -128,16 +163,7 @@ export default function AdjustmentPage({ onBack }: Props) {
         exactMatches.push(skuProduct)
       }
 
-      const { data: barcodeData, error: barcodeError } = await supabase
-        .from("product_barcodes")
-        .select("product_sku")
-        .eq("barcode", value)
-        .eq("enabled", true)
-        .maybeSingle()
-
-      if (barcodeError) throw barcodeError
-
-      const barcodeSku = barcodeData?.product_sku ?? ""
+      const barcodeSku = await loadSkuByBarcode(value)
       const barcodeProduct =
         barcodeSku && barcodeSku !== skuProduct?.product_sku
           ? await loadProductBySku(barcodeSku)
@@ -148,10 +174,7 @@ export default function AdjustmentPage({ onBack }: Props) {
       }
 
       const keywordProducts = await searchProductsByKeyword(value)
-      const results = [...exactMatches, ...keywordProducts].filter(
-        (row, index, rows) =>
-          rows.findIndex((item) => item.product_sku === row.product_sku) === index
-      )
+      const results = dedupeProducts([...exactMatches, ...keywordProducts])
 
       setSearchResults(results)
 
@@ -161,6 +184,49 @@ export default function AdjustmentPage({ onBack }: Props) {
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : "商品查詢失敗")
+    } finally {
+      setLoadingProduct(false)
+    }
+  }
+
+  async function searchStockProductOptions(searchValue = searchKeyword) {
+    const value = searchValue.trim()
+    if (!value) {
+      setError("請輸入 SKU、關鍵字或條碼")
+      return
+    }
+
+    try {
+      setLoadingProduct(true)
+      setError("")
+      setMessage("")
+      setSearchResults([])
+
+      const barcodeSku = await loadSkuByBarcode(value)
+      const stockRows = await loadStockRows()
+      const lowerValue = value.toLowerCase()
+
+      const results = stockRows
+        .filter((row) => {
+          if (row.warehouse_code !== warehouse) return false
+          if (Number(row.box ?? 0) <= 0) return false
+          if (barcodeSku && row.product_sku === barcodeSku) return true
+
+          const sku = row.product_sku.toLowerCase()
+          const name = (row.product_name ?? "").toLowerCase()
+          return sku.includes(lowerValue) || name.includes(lowerValue)
+        })
+        .slice(0, 10)
+        .map(stockRowToProduct)
+
+      setSearchResults(results)
+
+      if (results.length === 0) {
+        setError("找不到有箱數庫存的商品")
+      }
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "庫存查詢失敗")
     } finally {
       setLoadingProduct(false)
     }
@@ -197,6 +263,8 @@ export default function AdjustmentPage({ onBack }: Props) {
     if (mode === "backfill_inbound") {
       const latestCost = await loadLatestUnitCost(nextProduct.product_sku)
       setUnitCost(latestCost)
+    } else {
+      setUnitCost("")
     }
   }
 
@@ -217,6 +285,62 @@ export default function AdjustmentPage({ onBack }: Props) {
       product_name: row.product_name ?? "",
       units_per_box: row.units_per_box ?? 0,
       tags: row.tags ?? [],
+    }
+  }
+
+  async function loadSkuByBarcode(value: string) {
+    const { data, error: barcodeError } = await supabase
+      .from("product_barcodes")
+      .select("product_sku")
+      .eq("barcode", value)
+      .eq("enabled", true)
+      .maybeSingle()
+
+    if (barcodeError) throw barcodeError
+    return data?.product_sku ?? ""
+  }
+
+  async function loadStockRows() {
+    const stockBizDate = mode === "box2piece" ? getBusinessDateText() : adjustDate
+    const { data, error: stockError } = await supabase.rpc("get_business_day_stock", {
+      p_group: GROUP_CODE,
+      p_biz_date: stockBizDate,
+    })
+
+    if (stockError) throw stockError
+    return (data ?? []) as StockRow[]
+  }
+
+  async function refreshSelectedStock(productSku: string) {
+    try {
+      const stockRows = await loadStockRows()
+      const row = stockRows.find(
+        (item) => item.product_sku === productSku && item.warehouse_code === warehouse
+      )
+
+      setProduct((current) => {
+        if (!current || current.product_sku !== productSku) return current
+        if (!row) {
+          return {
+            ...current,
+            stock_box: 0,
+            stock_piece: 0,
+            stock_amount: 0,
+          }
+        }
+
+        return {
+          ...current,
+          units_per_box: Number(row.units_per_box ?? current.units_per_box ?? 0),
+          product_name: row.product_name ?? current.product_name,
+          stock_box: Number(row.box ?? 0),
+          stock_piece: Number(row.piece ?? 0),
+          stock_amount: Number(row.amount ?? 0),
+        }
+      })
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "庫存重新讀取失敗")
     }
   }
 
@@ -245,24 +369,30 @@ export default function AdjustmentPage({ onBack }: Props) {
     setBoxQty("0")
     setPieceQty("0")
     setExpiryDate("")
+    setProduct(null)
+    setSearchKeyword("")
+    setSearchResults([])
 
-    if (nextMode === "backfill_outbound") {
-      setUnitCost("")
-    } else if (product) {
+    if (nextMode === "backfill_inbound" && product) {
       void loadLatestUnitCost(product.product_sku).then(setUnitCost).catch((err) => {
         console.error(err)
         setUnitCost("")
       })
+    } else {
+      setUnitCost("")
     }
   }
 
   async function submitAdjustment() {
+    if (submittingRef.current) return
+
     if (!product) {
       setError("請先加入商品")
       return
     }
 
     try {
+      submittingRef.current = true
       setSaving(true)
       setError("")
       setMessage("")
@@ -270,20 +400,26 @@ export default function AdjustmentPage({ onBack }: Props) {
       const qtyBox = Number(boxQty || "0")
       const qtyPiece = Number(pieceQty || "0")
 
-      if (!adjustDate) throw new Error("請選擇異動日期")
+      if (!isBox2Piece && !adjustDate) throw new Error("請選擇異動日期")
       if (!Number.isFinite(qtyBox) || qtyBox < 0) throw new Error("箱數不可小於 0")
       if (!Number.isFinite(qtyPiece) || qtyPiece < 0) throw new Error("散數不可小於 0")
-      if (qtyBox === 0 && qtyPiece === 0) throw new Error("請輸入箱數或散數")
 
-      if (mode === "backfill_inbound") {
-        await createBackfillInbound(qtyBox, qtyPiece)
+      if (mode === "box2piece") {
+        await createBox2Piece(qtyBox)
       } else {
-        await createBackfillOutbound(qtyBox, qtyPiece)
+        if (qtyBox === 0 && qtyPiece === 0) throw new Error("請輸入箱數或散數")
+
+        if (mode === "backfill_inbound") {
+          await createBackfillInbound(qtyBox, qtyPiece)
+        } else {
+          await createBackfillOutbound(qtyBox, qtyPiece)
+        }
       }
 
-      await rebuildAfterBackfill()
+      const rebuildStartDate = isBox2Piece ? getBusinessDateText() : adjustDate
+      await rebuildAfterBackfill(rebuildStartDate)
 
-      setMessage(`${modeLabel}已送出，已要求從 ${adjustDate} 起重建關帳與試算表`)
+      setMessage(`${modeLabel}已送出，已要求從 ${rebuildStartDate} 起重建關帳與試算表`)
       setProduct(null)
       setSearchKeyword("")
       setSearchResults([])
@@ -295,6 +431,7 @@ export default function AdjustmentPage({ onBack }: Props) {
       console.error(err)
       setError(formatErrorMessage(err))
     } finally {
+      submittingRef.current = false
       setSaving(false)
     }
   }
@@ -339,10 +476,46 @@ export default function AdjustmentPage({ onBack }: Props) {
     if (outboundError) throw outboundError
   }
 
-  async function rebuildAfterBackfill() {
+  async function createBox2Piece(qtyBox: number) {
+    if (!Number.isFinite(qtyBox) || qtyBox <= 0) {
+      throw new Error("請輸入要箱轉散的箱數")
+    }
+
+    const stockRows = await loadStockRows()
+    const stockRow = stockRows.find(
+      (item) =>
+        item.product_sku === product?.product_sku && item.warehouse_code === warehouse
+    )
+    const stockBox = Number(stockRow?.box ?? 0)
+
+    setProduct((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        stock_box: stockBox,
+        stock_piece: Number(stockRow?.piece ?? 0),
+        stock_amount: Number(stockRow?.amount ?? 0),
+      }
+    })
+
+    if (stockBox <= 0) throw new Error("此商品目前沒有可轉換的箱數庫存")
+    if (qtyBox > stockBox) throw new Error("轉換箱數不可大於目前庫存箱數")
+
+    const { error: box2PieceError } = await supabase.rpc("box2piece_min", {
+      p_group: GROUP_CODE,
+      p_sku: product?.product_sku,
+      p_wh: warehouse,
+      p_box: qtyBox,
+      p_at: new Date().toISOString(),
+    })
+
+    if (box2PieceError) throw box2PieceError
+  }
+
+  async function rebuildAfterBackfill(startDate: string) {
     const { error: closingError } = await supabase.rpc("rebuild_closings_range_from", {
       p_group: GROUP_CODE,
-      p_start_biz_date: adjustDate,
+      p_start_biz_date: startDate,
     })
 
     if (closingError) {
@@ -351,7 +524,7 @@ export default function AdjustmentPage({ onBack }: Props) {
 
     const { error: gasError } = await supabase.rpc("push_gas_rebuild_range", {
       p_group: GROUP_CODE,
-      p_start_date: adjustDate,
+      p_start_date: startDate,
       p_end_date: getTodayText(),
       p_reason: mode,
     })
@@ -370,7 +543,7 @@ export default function AdjustmentPage({ onBack }: Props) {
           </button>
           <div>
             <h1 style={storeTitleStyle}>異動單</h1>
-            <p style={subtitleStyle}>補入庫 13:00 / 補出庫 14:00</p>
+            <p style={subtitleStyle}>補入庫 13:00 / 補出庫 14:00 / 箱轉散即時</p>
           </div>
         </header>
 
@@ -387,6 +560,12 @@ export default function AdjustmentPage({ onBack }: Props) {
           >
             補出庫
           </button>
+          <button
+            onClick={() => changeMode("box2piece")}
+            style={mode === "box2piece" ? activeModeButtonStyle : modeButtonStyle}
+          >
+            箱轉散
+          </button>
         </div>
 
         {message && <div style={messageStyle}>{message}</div>}
@@ -401,7 +580,7 @@ export default function AdjustmentPage({ onBack }: Props) {
           }}
           style={addProductButtonStyle}
         >
-          + 加入商品
+          {isBox2Piece ? "+ 選擇有庫存商品" : "+ 加入商品"}
         </button>
 
         {product && (
@@ -409,6 +588,16 @@ export default function AdjustmentPage({ onBack }: Props) {
             <div style={productNameStyle}>{product.product_name}</div>
             <div style={productMetaStyle}>SKU：{product.product_sku}</div>
             <div style={productMetaStyle}>箱入數：{product.units_per_box || "-"}</div>
+            {isBox2Piece && (
+              <>
+                <div style={productMetaStyle}>
+                  庫存箱數：{formatNumber(product.stock_box ?? 0)}
+                </div>
+                <div style={productMetaStyle}>
+                  庫存散數：{formatNumber(product.stock_piece ?? 0)}
+                </div>
+              </>
+            )}
             {product.tags.length > 0 && (
               <div style={tagRowStyle}>
                 {product.tags.map((tag) => (
@@ -422,14 +611,22 @@ export default function AdjustmentPage({ onBack }: Props) {
         )}
 
         <section style={panelStyle}>
-          <label style={labelStyle}>異動日期</label>
-          <input
-            value={adjustDate}
-            onChange={(event) => setAdjustDate(event.target.value)}
-            type="date"
-            style={inputStyle}
-          />
-          <div style={hintStyle}>資料寫入時間固定為 {fixedTime}（台北時間）</div>
+          {!isBox2Piece && (
+            <>
+              <label style={labelStyle}>異動日期</label>
+              <input
+                value={adjustDate}
+                onChange={(event) => setAdjustDate(event.target.value)}
+                type="date"
+                style={inputStyle}
+              />
+            </>
+          )}
+          <div style={hintStyle}>
+            {isBox2Piece
+              ? "箱轉散會以送出當下時間寫入"
+              : `資料寫入時間固定為 ${fixedTime}（台北時間）`}
+          </div>
 
           <label style={labelStyle}>倉庫</label>
           <select
@@ -451,9 +648,16 @@ export default function AdjustmentPage({ onBack }: Props) {
             style={{ ...inputStyle, color: "#bbb" }}
           />
 
-          <div style={twoColumnStyle}>
-            <div>
-              <label style={labelStyle}>{isInbound ? "補入箱數" : "補出箱數"}</label>
+          {isBox2Piece && (
+            <>
+              <label style={labelStyle}>目前庫存箱數</label>
+              <input
+                readOnly
+                value={formatNumber(product?.stock_box ?? 0)}
+                style={{ ...inputStyle, color: "#bbb" }}
+              />
+
+              <label style={labelStyle}>要轉成散數的箱數</label>
               <input
                 value={boxQty}
                 onChange={(event) => setBoxQty(event.target.value)}
@@ -462,19 +666,44 @@ export default function AdjustmentPage({ onBack }: Props) {
                 min={0}
                 style={inputStyle}
               />
-            </div>
-            <div>
-              <label style={labelStyle}>{isInbound ? "補入散數" : "補出散數"}</label>
+
+              <label style={labelStyle}>轉換後新增散數</label>
               <input
-                value={pieceQty}
-                onChange={(event) => setPieceQty(event.target.value)}
-                inputMode="decimal"
-                type="number"
-                min={0}
-                style={inputStyle}
+                readOnly
+                value={formatNumber(convertedPiece)}
+                style={{ ...inputStyle, color: "#bbb" }}
               />
+
+              <div style={hintBoxStyle}>箱轉散只允許箱轉散，不提供散轉箱。</div>
+            </>
+          )}
+
+          {!isBox2Piece && (
+            <div style={twoColumnStyle}>
+              <div>
+                <label style={labelStyle}>{isInbound ? "補入箱數" : "補出箱數"}</label>
+                <input
+                  value={boxQty}
+                  onChange={(event) => setBoxQty(event.target.value)}
+                  inputMode="decimal"
+                  type="number"
+                  min={0}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>{isInbound ? "補入散數" : "補出散數"}</label>
+                <input
+                  value={pieceQty}
+                  onChange={(event) => setPieceQty(event.target.value)}
+                  inputMode="decimal"
+                  type="number"
+                  min={0}
+                  style={inputStyle}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {isInbound && (
             <>
@@ -503,7 +732,7 @@ export default function AdjustmentPage({ onBack }: Props) {
             </>
           )}
 
-          {!isInbound && (
+          {isOutbound && (
             <div style={hintBoxStyle}>補出庫不填成本，成本會由既有庫存自動帶出。</div>
           )}
         </section>
@@ -522,7 +751,7 @@ export default function AdjustmentPage({ onBack }: Props) {
           />
           <section style={searchSheetStyle}>
             <div style={sheetHeaderStyle}>
-              <h2 style={sheetTitleStyle}>搜尋商品</h2>
+              <h2 style={sheetTitleStyle}>{isBox2Piece ? "搜尋有庫存商品" : "搜尋商品"}</h2>
               <button
                 aria-label="關閉"
                 onClick={() => setSearchOpen(false)}
@@ -570,6 +799,11 @@ export default function AdjustmentPage({ onBack }: Props) {
                     <span style={resultMetaStyle}>
                       箱入數：{row.units_per_box || "-"}
                     </span>
+                    {isBox2Piece && (
+                      <span style={resultMetaStyle}>
+                        庫存箱數：{formatNumber(row.stock_box ?? 0)}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -581,7 +815,26 @@ export default function AdjustmentPage({ onBack }: Props) {
   )
 }
 
-function buildTaipeiTimestamp(dateText: string, hour: "13" | "14") {
+function stockRowToProduct(row: StockRow): Product {
+  return {
+    product_sku: row.product_sku,
+    product_name: row.product_name ?? "",
+    units_per_box: Number(row.units_per_box ?? 0),
+    tags: [],
+    stock_box: Number(row.box ?? 0),
+    stock_piece: Number(row.piece ?? 0),
+    stock_amount: Number(row.amount ?? 0),
+  }
+}
+
+function dedupeProducts(rows: Product[]) {
+  return rows.filter(
+    (row, index, allRows) =>
+      allRows.findIndex((item) => item.product_sku === row.product_sku) === index
+  )
+}
+
+function buildTaipeiTimestamp(dateText: string, hour: "12" | "13" | "14") {
   return `${dateText}T${hour}:00:00+08:00`
 }
 
@@ -600,6 +853,36 @@ function getTodayText() {
   return `${year}-${month}-${day}`
 }
 
+function getBusinessDateText() {
+  const now = new Date()
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(now)
+
+  const year = parts.find((part) => part.type === "year")?.value ?? ""
+  const month = parts.find((part) => part.type === "month")?.value ?? ""
+  const day = parts.find((part) => part.type === "day")?.value ?? ""
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0")
+
+  const base = new Date(`${year}-${month}-${day}T12:00:00+08:00`)
+  if (hour < 5) base.setDate(base.getDate() - 1)
+
+  const businessYear = base.getFullYear()
+  const businessMonth = String(base.getMonth() + 1).padStart(2, "0")
+  const businessDay = String(base.getDate()).padStart(2, "0")
+
+  return `${businessYear}-${businessMonth}-${businessDay}`
+}
+
+function formatNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : String(value)
+}
+
 function formatErrorMessage(err: unknown) {
   const message = err instanceof Error ? err.message : "異動單送出失敗"
 
@@ -608,6 +891,11 @@ function formatErrorMessage(err: unknown) {
   if (message.includes("ERR_UNIT_COST_REQUIRED")) return "找不到可用成本，請先確認庫存成本"
   if (message.includes("ERR_PRODUCT_NOT_FOUND")) return "找不到此商品"
   if (message.includes("ERR_EXPIRY_REQUIRED")) return "此食品補入庫需要填寫效期"
+  if (message.includes("box2piece_min: empty sku")) return "請先選擇商品"
+  if (message.includes("box2piece_min: p_box must be > 0")) return "請輸入要轉換的箱數"
+  if (message.includes("box2piece_min: invalid units_per_box")) {
+    return "此商品箱入數異常，無法箱轉散"
+  }
 
   return message
 }
@@ -660,7 +948,7 @@ const subtitleStyle: CSSProperties = {
 
 const modeSwitchStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
+  gridTemplateColumns: "1fr 1fr 1fr",
   gap: 8,
   borderRadius: 14,
   background: "#151515",
@@ -675,7 +963,7 @@ const modeButtonStyle: CSSProperties = {
   borderRadius: 10,
   background: "transparent",
   color: "#aaa",
-  fontSize: 16,
+  fontSize: 15,
   fontWeight: 800,
 }
 
