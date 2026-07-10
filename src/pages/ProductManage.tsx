@@ -48,6 +48,7 @@ type Filter = "all" | "enabled" | "disabled"
 type Mode = "list" | "detail"
 
 const TAG_OPTIONS = ["代夾物", "食品", "百貨", "娃娃"]
+const PRODUCT_RESULT_LIMIT = 50
 
 function useIsDesktop() {
   const [isDesktop, setIsDesktop] = useState(() => {
@@ -82,43 +83,131 @@ export default function ProductManage({ onBack }: Props) {
   const [message, setMessage] = useState("")
 
   useEffect(() => {
-    loadProducts()
-  }, [])
+    let cancelled = false
+
+    const timer = window.setTimeout(() => {
+      loadProducts(query, filter, () => cancelled)
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [filter, query])
 
   const filteredProducts = useMemo(() => {
-    const keyword = query.trim().toLowerCase()
+    return products.slice(0, PRODUCT_RESULT_LIMIT)
+  }, [products])
 
-    return products
-      .filter((product) => {
-        if (filter === "enabled" && !product.enabled) return false
-        if (filter === "disabled" && product.enabled) return false
-        if (!keyword) return true
+  function applyEnabledFilter(
+    request: any,
+    activeFilter: Filter
+  ) {
+    if (activeFilter === "enabled") return request.eq("enabled", true)
+    if (activeFilter === "disabled") return request.eq("enabled", false)
+    return request
+  }
 
-        return (
-          product.product_sku.toLowerCase().includes(keyword) ||
-          product.product_name.toLowerCase().includes(keyword) ||
-          product.barcodes.some((barcode) =>
-            barcode.barcode.toLowerCase().includes(keyword)
-          )
-        )
-      })
-      .slice(0, 10)
-  }, [filter, products, query])
+  function mergeProductRows(rowGroups: ProductRow[][]) {
+    const map = new Map<string, ProductRow>()
 
-  async function loadProducts() {
+    rowGroups.flat().forEach((row) => {
+      if (!row.product_sku) return
+      map.set(row.product_sku, row)
+    })
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.product_sku.localeCompare(b.product_sku)
+    )
+  }
+
+  async function searchProductsByColumn(
+    column: "product_sku" | "product_name",
+    keyword: string,
+    activeFilter: Filter
+  ) {
+    let request = supabase
+      .from("products")
+      .select("product_sku,product_name,units_per_box,enabled,category,tags")
+      .ilike(column, `%${keyword}%`)
+      .order("product_sku", { ascending: true })
+      .limit(PRODUCT_RESULT_LIMIT)
+
+    request = applyEnabledFilter(request, activeFilter)
+
+    const { data, error } = await request
+    if (error) throw error
+
+    return (data ?? []) as ProductRow[]
+  }
+
+  async function searchProductsByBarcode(keyword: string, activeFilter: Filter) {
+    const { data: barcodeRows, error: barcodeError } = await supabase
+      .from("product_barcodes")
+      .select("product_sku")
+      .eq("enabled", true)
+      .ilike("barcode", `%${keyword}%`)
+      .limit(PRODUCT_RESULT_LIMIT)
+
+    if (barcodeError) throw barcodeError
+
+    const skuList = Array.from(
+      new Set((barcodeRows ?? []).map((row) => row.product_sku).filter(Boolean))
+    )
+
+    if (skuList.length === 0) return []
+
+    let request = supabase
+      .from("products")
+      .select("product_sku,product_name,units_per_box,enabled,category,tags")
+      .in("product_sku", skuList)
+      .order("product_sku", { ascending: true })
+
+    request = applyEnabledFilter(request, activeFilter)
+
+    const { data, error } = await request
+    if (error) throw error
+
+    return (data ?? []) as ProductRow[]
+  }
+
+  async function loadProducts(
+    searchText = query,
+    activeFilter = filter,
+    shouldCancel = () => false
+  ) {
     try {
       setLoading(true)
       setError("")
 
-      const { data: productData, error: productError } = await supabase
-        .from("products")
-        .select("product_sku,product_name,units_per_box,enabled,category,tags")
-        .order("product_sku", { ascending: true })
-        .limit(200)
+      const keyword = searchText.trim()
+      let rows: ProductRow[] = []
 
-      if (productError) throw productError
+      if (keyword) {
+        const [skuRows, nameRows, barcodeRows] = await Promise.all([
+          searchProductsByColumn("product_sku", keyword, activeFilter),
+          searchProductsByColumn("product_name", keyword, activeFilter),
+          searchProductsByBarcode(keyword, activeFilter),
+        ])
 
-      const rows = (productData ?? []) as ProductRow[]
+        rows = mergeProductRows([skuRows, nameRows, barcodeRows])
+      } else {
+        let request = supabase
+          .from("products")
+          .select("product_sku,product_name,units_per_box,enabled,category,tags")
+          .order("product_sku", { ascending: true })
+          .limit(PRODUCT_RESULT_LIMIT)
+
+        request = applyEnabledFilter(request, activeFilter)
+
+        const { data: productData, error: productError } = await request
+        if (productError) throw productError
+
+        rows = (productData ?? []) as ProductRow[]
+      }
+
+      if (shouldCancel()) return
+
       const skuList = Array.from(new Set(rows.map((product) => product.product_sku)))
       let barcodeMap = new Map<string, ProductBarcode[]>()
 
@@ -131,6 +220,7 @@ export default function ProductManage({ onBack }: Props) {
           .order("barcode", { ascending: true })
 
         if (barcodeError) throw barcodeError
+        if (shouldCancel()) return
 
         barcodeMap = (barcodeData ?? []).reduce((map, row) => {
           const barcodeRow = row as BarcodeRow
@@ -146,8 +236,9 @@ export default function ProductManage({ onBack }: Props) {
         }, new Map<string, ProductBarcode[]>())
       }
 
-      setProducts(
-        rows.map((product) => ({
+      const nextProducts = rows
+        .slice(0, PRODUCT_RESULT_LIMIT)
+        .map((product) => ({
           product_sku: product.product_sku,
           product_name: product.product_name ?? "",
           units_per_box: product.units_per_box ?? 0,
@@ -156,12 +247,14 @@ export default function ProductManage({ onBack }: Props) {
           tags: product.tags ?? [],
           barcodes: barcodeMap.get(product.product_sku) ?? [],
         }))
-      )
+
+      if (!shouldCancel()) setProducts(nextProducts)
     } catch (err) {
+      if (shouldCancel()) return
       console.error(err)
       setError(err instanceof Error ? err.message : "商品讀取失敗")
     } finally {
-      setLoading(false)
+      if (!shouldCancel()) setLoading(false)
     }
   }
 
@@ -367,7 +460,7 @@ export default function ProductManage({ onBack }: Props) {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜尋 sku / 品名 / 條碼（最多顯示 10 筆）"
+                placeholder="搜尋 sku / 品名 / 條碼（直接查詢資料庫）"
                 style={{
                   ...searchInputStyle,
                   ...(isDesktop ? desktopSearchInputStyle : {}),
@@ -436,7 +529,9 @@ export default function ProductManage({ onBack }: Props) {
               ))}
 
               {filteredProducts.length === 0 && (
-                <div style={emptyStyle}>沒有符合的商品</div>
+                <div style={emptyStyle}>
+                  {query.trim() ? "沒有符合的商品" : "請輸入關鍵字搜尋更多商品"}
+                </div>
               )}
             </section>
           )}
