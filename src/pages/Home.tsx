@@ -8,6 +8,7 @@ type Props = {
   onAuditClick: () => void
   onHistoryClick: () => void
   onMachineClick: () => void
+  onMachineProfitClick: () => void
   onProductClick: () => void
   onInboundClick: () => void
   onAdjustmentClick: () => void
@@ -39,6 +40,7 @@ type SummaryTotals = Pick<
 
 export default function Home({
   onMachineClick,
+  onMachineProfitClick,
   onProductClick,
   onInboundClick,
   onAdjustmentClick,
@@ -129,6 +131,13 @@ export default function Home({
       onClick: onMachineClick,
     },
     {
+      code: "P/L",
+      title: "機台損益",
+      subtitle: "日報 / 台內校正",
+      accent: "#f7c873",
+      onClick: onMachineProfitClick,
+    },
+    {
       code: "BOT",
       title: "LINE Bot",
       subtitle: "記錄 / 查詢 / 取消",
@@ -140,8 +149,9 @@ export default function Home({
   return (
     <main style={pageStyle}>
       <section style={heroStyle}>
-        <div>
-          <h1 style={titleStyle}>營運控制台</h1>
+        <div style={brandBlockStyle}>
+          <h1 style={storeTitleStyle}>嘉義航母</h1>
+          <div style={controlTitleStyle}>營運控制</div>
         </div>
 
         <div style={dateBlockStyle}>
@@ -288,7 +298,7 @@ const pageStyle: CSSProperties = {
     "radial-gradient(circle at 18% 0%, rgba(56, 189, 248, 0.18), transparent 28%), linear-gradient(180deg, #05070b 0%, #030407 100%)",
   color: "#f8fafc",
   padding:
-    "calc(env(safe-area-inset-top, 0px) + 28px) 18px calc(env(safe-area-inset-bottom, 0px) + 116px)",
+    "calc(env(safe-area-inset-top, 0px) + 18px) 18px calc(env(safe-area-inset-bottom, 0px) + 116px)",
   boxSizing: "border-box",
   fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
 }
@@ -296,17 +306,29 @@ const pageStyle: CSSProperties = {
 const heroStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
-  gap: 14,
+  gap: 10,
   alignItems: "end",
-  marginBottom: 16,
+  marginBottom: 12,
 }
 
-const titleStyle: CSSProperties = {
+const brandBlockStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+}
+
+const storeTitleStyle: CSSProperties = {
   margin: 0,
   color: "#f8fafc",
-  fontSize: 28,
+  fontSize: 23,
   lineHeight: 1.1,
   fontWeight: 950,
+  letterSpacing: 0,
+}
+
+const controlTitleStyle: CSSProperties = {
+  color: "#60a5fa",
+  fontSize: 13,
+  fontWeight: 800,
   letterSpacing: 0,
 }
 
