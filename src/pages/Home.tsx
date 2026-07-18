@@ -1,5 +1,8 @@
-//home.tsx
-import type { CSSProperties } from "react"
+// Home.tsx
+import { useEffect, useState, type CSSProperties } from "react"
+import { supabase } from "../lib/supabase"
+
+const GROUP_CODE = "catch_0001"
 
 type Props = {
   onAuditClick: () => void
@@ -19,8 +22,22 @@ type ActionCard = {
   onClick: () => void
 }
 
+type DailySheetRow = Record<string, unknown>
+
+type DashboardSummary = {
+  inventoryAmount: number
+  inboundAmount: number
+  outboundAmount: number
+  loading: boolean
+  error: string
+}
+
+type SummaryTotals = Pick<
+  DashboardSummary,
+  "inventoryAmount" | "inboundAmount" | "outboundAmount"
+>
+
 export default function Home({
-  onHistoryClick,
   onMachineClick,
   onProductClick,
   onInboundClick,
@@ -28,7 +45,66 @@ export default function Home({
   onLineBotClick,
 }: Props) {
   const todayText = getTaipeiDisplayDate()
-  const businessDateText = getBusinessDateText()
+  const businessDate = getBusinessDateValue()
+  const [summary, setSummary] = useState<DashboardSummary>({
+    inventoryAmount: 0,
+    inboundAmount: 0,
+    outboundAmount: 0,
+    loading: true,
+    error: "",
+  })
+
+  useEffect(() => {
+    loadDashboardSummary(businessDate)
+  }, [businessDate])
+
+  async function loadDashboardSummary(bizDate: string) {
+    try {
+      setSummary((current) => ({ ...current, loading: true, error: "" }))
+
+      const { data, error } = await supabase.rpc("daily_sheet_rows_full", {
+        p_group: GROUP_CODE,
+        p_biz_date: bizDate,
+      })
+
+      if (error) throw error
+
+      const rows = (data ?? []) as DailySheetRow[]
+      const totals = rows.reduce<SummaryTotals>(
+        (acc, row) => {
+          acc.inventoryAmount += readNumber(
+            row,
+            "庫存金額",
+            "end_amount",
+            "stock_amount"
+          )
+          acc.inboundAmount += readNumber(row, "入庫金額", "in_amount")
+          acc.outboundAmount += readNumber(row, "出庫金額", "out_amount")
+          return acc
+        },
+        {
+          inventoryAmount: 0,
+          inboundAmount: 0,
+          outboundAmount: 0,
+        }
+      )
+
+      setSummary({
+        ...totals,
+        loading: false,
+        error: "",
+      })
+    } catch (err) {
+      console.error(err)
+      setSummary({
+        inventoryAmount: 0,
+        inboundAmount: 0,
+        outboundAmount: 0,
+        loading: false,
+        error: "首頁數據讀取失敗",
+      })
+    }
+  }
 
   const actionCards: ActionCard[] = [
     {
@@ -41,14 +117,14 @@ export default function Home({
     {
       code: "ADJ",
       title: "異動單",
-      subtitle: "補入庫 / 補出庫",
+      subtitle: "補入庫 / 補出庫 / 箱轉散",
       accent: "#74d6ff",
       onClick: onAdjustmentClick,
     },
     {
       code: "MAC",
       title: "機台管理",
-      subtitle: "配置 / 生命週期",
+      subtitle: "配置 / 盤點 / 生命週期",
       accent: "#8bdbb5",
       onClick: onMachineClick,
     },
@@ -65,13 +141,12 @@ export default function Home({
     <main style={pageStyle}>
       <section style={heroStyle}>
         <div>
-          <div style={storeLabelStyle}>嘉義航母店</div>
           <h1 style={titleStyle}>營運控制台</h1>
         </div>
 
         <div style={dateBlockStyle}>
           <div style={dateTextStyle}>{todayText}</div>
-          <div style={bizDateStyle}>業務日：{businessDateText}</div>
+          <div style={bizDateStyle}>業務日：{businessDate}（05:00切日）</div>
         </div>
       </section>
 
@@ -79,27 +154,32 @@ export default function Home({
         <div style={summaryGlowStyle} />
         <div style={summaryHeaderStyle}>
           <span style={summaryLabelStyle}>庫存</span>
-          <span style={summaryValueStyle}>--</span>
+          <span style={summaryValueStyle}>
+            {summary.loading ? "--" : formatMoney(summary.inventoryAmount)}
+          </span>
         </div>
 
         <div style={metricGridStyle}>
           <div style={metricCellStyle}>
             <span style={metricLabelStyle}>入庫</span>
-            <strong style={metricValueStyle}>--</strong>
+            <strong style={metricValueStyle}>
+              {summary.loading ? "--" : formatMoney(summary.inboundAmount)}
+            </strong>
           </div>
           <div style={metricDividerStyle} />
           <div style={metricCellStyle}>
             <span style={metricLabelStyle}>出庫</span>
-            <strong style={metricValueStyle}>--</strong>
+            <strong style={metricValueStyle}>
+              {summary.loading ? "--" : formatMoney(summary.outboundAmount)}
+            </strong>
           </div>
         </div>
+
+        {summary.error && <div style={summaryErrorStyle}>{summary.error}</div>}
       </section>
 
       <section style={sectionHeaderStyle}>
         <h2 style={sectionTitleStyle}>快捷功能</h2>
-        <button style={textButtonStyle} onClick={onHistoryClick}>
-          歷史
-        </button>
       </section>
 
       <section style={actionListStyle}>
@@ -109,7 +189,7 @@ export default function Home({
               style={{
                 ...iconBoxStyle,
                 borderColor: `${card.accent}55`,
-                boxShadow: `0 0 30px ${card.accent}1f`,
+                boxShadow: `0 0 28px ${card.accent}1f`,
               }}
             >
               <span style={{ ...iconCodeStyle, color: card.accent }}>
@@ -127,19 +207,31 @@ export default function Home({
         ))}
       </section>
 
-      <section style={sectionHeaderStyle}>
-        <h2 style={sectionTitleStyle}>交易記錄</h2>
-        <button style={textButtonStyle} onClick={onHistoryClick}>
-          檢視全部
-        </button>
-      </section>
-
       <button style={primaryCtaStyle} onClick={onInboundClick}>
         <span style={ctaIconStyle}>IN</span>
         <span>入庫</span>
       </button>
     </main>
   )
+}
+
+function readNumber(row: DailySheetRow, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string") {
+      const parsed = Number(value.replace(/[^0-9.-]/g, ""))
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return 0
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("zh-TW", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value)
 }
 
 function getTaipeiDisplayDate() {
@@ -159,7 +251,7 @@ function getTaipeiDisplayDate() {
   return `${year}/${month}/${day}(${weekday})`
 }
 
-function getBusinessDateText() {
+function getBusinessDateValue() {
   const now = new Date()
   const taipeiParts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Taipei",
@@ -184,7 +276,7 @@ function getBusinessDateText() {
   const businessMonth = String(base.getMonth() + 1).padStart(2, "0")
   const businessDay = String(base.getDate()).padStart(2, "0")
 
-  return `${businessYear}-${businessMonth}-${businessDay}（05:00切日）`
+  return `${businessYear}-${businessMonth}-${businessDay}`
 }
 
 const pageStyle: CSSProperties = {
@@ -193,9 +285,10 @@ const pageStyle: CSSProperties = {
   maxWidth: "100vw",
   overflowX: "hidden",
   background:
-    "radial-gradient(circle at 18% 0%, rgba(56, 189, 248, 0.2), transparent 28%), linear-gradient(180deg, #05070b 0%, #030407 100%)",
+    "radial-gradient(circle at 18% 0%, rgba(56, 189, 248, 0.18), transparent 28%), linear-gradient(180deg, #05070b 0%, #030407 100%)",
   color: "#f8fafc",
-  padding: "calc(env(safe-area-inset-top, 0px) + 32px) 18px 28px",
+  padding:
+    "calc(env(safe-area-inset-top, 0px) + 28px) 18px calc(env(safe-area-inset-bottom, 0px) + 116px)",
   boxSizing: "border-box",
   fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
 }
@@ -205,24 +298,15 @@ const heroStyle: CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   gap: 14,
   alignItems: "end",
-  marginBottom: 22,
-}
-
-const storeLabelStyle: CSSProperties = {
-  color: "#f8fafc",
-  fontSize: 28,
-  lineHeight: 1.1,
-  fontWeight: 950,
-  letterSpacing: 0,
-  marginBottom: 8,
+  marginBottom: 16,
 }
 
 const titleStyle: CSSProperties = {
   margin: 0,
-  color: "#8dd7ff",
-  fontSize: 14,
-  lineHeight: 1.2,
-  fontWeight: 900,
+  color: "#f8fafc",
+  fontSize: 28,
+  lineHeight: 1.1,
+  fontWeight: 950,
   letterSpacing: 0,
 }
 
@@ -249,24 +333,24 @@ const bizDateStyle: CSSProperties = {
 const summaryCardStyle: CSSProperties = {
   position: "relative",
   overflow: "hidden",
-  border: "1px solid rgba(148, 163, 184, 0.24)",
-  borderRadius: 28,
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 22,
   background:
-    "linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))",
+    "linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.035))",
   boxShadow:
-    "0 24px 60px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.13)",
-  padding: 24,
-  marginBottom: 28,
+    "0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.11)",
+  padding: "15px 18px",
+  marginBottom: 22,
 }
 
 const summaryGlowStyle: CSSProperties = {
   position: "absolute",
-  top: -80,
-  right: -70,
-  width: 170,
-  height: 170,
+  top: -84,
+  right: -78,
+  width: 150,
+  height: 150,
   borderRadius: "50%",
-  background: "rgba(96, 165, 250, 0.22)",
+  background: "rgba(96, 165, 250, 0.2)",
   filter: "blur(28px)",
   pointerEvents: "none",
 }
@@ -275,23 +359,23 @@ const summaryHeaderStyle: CSSProperties = {
   position: "relative",
   display: "flex",
   alignItems: "baseline",
-  gap: 14,
-  marginBottom: 22,
+  gap: 12,
+  marginBottom: 12,
 }
 
 const summaryLabelStyle: CSSProperties = {
   color: "#f8fafc",
-  fontSize: 28,
+  fontSize: 20,
   lineHeight: 1.1,
   fontWeight: 950,
 }
 
 const summaryValueStyle: CSSProperties = {
   color: "#60a5fa",
-  fontSize: 38,
+  fontSize: 24,
   lineHeight: 1,
   fontWeight: 950,
-  textShadow: "0 0 28px rgba(96, 165, 250, 0.36)",
+  textShadow: "0 0 24px rgba(96, 165, 250, 0.34)",
 }
 
 const metricGridStyle: CSSProperties = {
@@ -299,33 +383,41 @@ const metricGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1px 1fr",
   alignItems: "center",
-  gap: 18,
+  gap: 14,
 }
 
 const metricCellStyle: CSSProperties = {
   display: "grid",
-  gap: 10,
+  gap: 6,
 }
 
 const metricLabelStyle: CSSProperties = {
   color: "#dbeafe",
-  fontSize: 18,
+  fontSize: 13,
   lineHeight: 1.2,
   fontWeight: 900,
 }
 
 const metricValueStyle: CSSProperties = {
   color: "#f8fafc",
-  fontSize: 32,
+  fontSize: 20,
   lineHeight: 1,
   fontWeight: 950,
 }
 
 const metricDividerStyle: CSSProperties = {
   width: 1,
-  minHeight: 66,
+  minHeight: 36,
   background:
-    "linear-gradient(180deg, transparent, rgba(148,163,184,0.45), transparent)",
+    "linear-gradient(180deg, transparent, rgba(148,163,184,0.42), transparent)",
+}
+
+const summaryErrorStyle: CSSProperties = {
+  position: "relative",
+  color: "#fca5a5",
+  fontSize: 12,
+  fontWeight: 800,
+  marginTop: 10,
 }
 
 const sectionHeaderStyle: CSSProperties = {
@@ -333,54 +425,45 @@ const sectionHeaderStyle: CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: 14,
-  margin: "24px 0 12px",
+  margin: "18px 0 12px",
 }
 
 const sectionTitleStyle: CSSProperties = {
   margin: 0,
   color: "#f8fafc",
-  fontSize: 28,
+  fontSize: 26,
   lineHeight: 1.1,
   fontWeight: 950,
   letterSpacing: 0,
 }
 
-const textButtonStyle: CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#60a5fa",
-  fontSize: 17,
-  fontWeight: 950,
-  padding: 0,
-}
-
 const actionListStyle: CSSProperties = {
   display: "grid",
-  gap: 14,
+  gap: 13,
 }
 
 const actionCardStyle: CSSProperties = {
   width: "100%",
-  minHeight: 104,
+  minHeight: 94,
   display: "grid",
-  gridTemplateColumns: "72px minmax(0, 1fr) 34px",
+  gridTemplateColumns: "64px minmax(0, 1fr) 32px",
   alignItems: "center",
-  gap: 16,
+  gap: 15,
   border: "1px solid rgba(148,163,184,0.2)",
-  borderRadius: 24,
+  borderRadius: 22,
   background:
     "linear-gradient(145deg, rgba(255,255,255,0.09), rgba(255,255,255,0.035))",
   color: "#f8fafc",
-  padding: "16px 18px",
+  padding: "14px 16px",
   textAlign: "left",
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1)",
 }
 
 const iconBoxStyle: CSSProperties = {
-  width: 64,
-  height: 64,
+  width: 58,
+  height: 58,
   border: "1px solid rgba(255,255,255,0.14)",
-  borderRadius: 18,
+  borderRadius: 16,
   display: "grid",
   placeItems: "center",
   background: "rgba(255,255,255,0.08)",
@@ -396,52 +479,56 @@ const iconCodeStyle: CSSProperties = {
 const actionTextStyle: CSSProperties = {
   minWidth: 0,
   display: "grid",
-  gap: 7,
+  gap: 6,
 }
 
 const actionTitleStyle: CSSProperties = {
   color: "#f8fafc",
-  fontSize: 23,
+  fontSize: 22,
   lineHeight: 1.1,
   fontWeight: 950,
 }
 
 const actionSubtitleStyle: CSSProperties = {
   color: "#94a3b8",
-  fontSize: 15,
+  fontSize: 14,
   lineHeight: 1.25,
   fontWeight: 850,
 }
 
 const arrowStyle: CSSProperties = {
   justifySelf: "end",
-  fontSize: 36,
+  fontSize: 34,
   lineHeight: 1,
   fontWeight: 900,
 }
 
 const primaryCtaStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 74,
+  position: "fixed",
+  left: 18,
+  right: 18,
+  bottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)",
+  zIndex: 20,
+  minHeight: 68,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 16,
+  gap: 14,
   border: "none",
-  borderRadius: 32,
+  borderRadius: 28,
   background: "linear-gradient(135deg, #69aafc, #4f8eee)",
   color: "#ffffff",
-  fontSize: 25,
+  fontSize: 23,
   fontWeight: 950,
-  boxShadow: "0 22px 48px rgba(59,130,246,0.32)",
+  boxShadow: "0 18px 48px rgba(59,130,246,0.42)",
 }
 
 const ctaIconStyle: CSSProperties = {
-  width: 54,
-  height: 54,
+  width: 48,
+  height: 48,
   display: "grid",
   placeItems: "center",
-  borderRadius: 20,
+  borderRadius: 18,
   background: "rgba(255,255,255,0.16)",
   color: "#dbeafe",
   fontSize: 13,
