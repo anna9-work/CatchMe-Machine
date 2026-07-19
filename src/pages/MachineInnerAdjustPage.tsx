@@ -265,7 +265,24 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
 
       if (saveError) throw saveError
 
-      setMessage(`已儲存 ${bizDate} 結束台內校正，請由後台或 SQL 重建損益資料`)
+      const { error: rebuildError } = await supabase.rpc(
+        "rebuild_machine_lifecycle_daily_v1",
+        {
+          p_group: GROUP_CODE,
+          p_start_date: bizDate,
+          p_end_date: affectedStartDate,
+        }
+      )
+
+      if (rebuildError) {
+        setMessage(`已儲存 ${bizDate} 結束台內校正，但 Supabase 日結更新失敗`)
+        setError(rebuildError.message)
+        return
+      }
+
+      setMessage(
+        `已儲存 ${bizDate} 結束台內校正，Supabase 日結已更新至 ${affectedStartDate}`
+      )
       await loadItems()
     } catch (err) {
       console.error(err)
@@ -308,6 +325,12 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
           <div style={rebuildInfoRowStyle}>
             <span>寫入</span>
             <strong>{bizDate} 結束台內</strong>
+          </div>
+          <div style={rebuildInfoRowStyle}>
+            <span>更新</span>
+            <strong>
+              Supabase {bizDate} ～ {affectedStartDate}
+            </strong>
           </div>
           <div style={rebuildInfoRowStyle}>
             <span>影響</span>
@@ -475,12 +498,12 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
               opacity: saving ? 0.7 : 1,
             }}
           >
-            {saving ? "儲存中..." : "儲存校正"}
+            {saving ? "更新中..." : "儲存並更新日結"}
           </button>
 
           <div style={detailHintStyle}>
-            送出後只會寫入 {bizDate} 結束後台內數量，不會自動重建；完成重建後，
-            {affectedStartDate} 的損益起始台內會吃到這個校正值。
+            送出後會寫入 {bizDate} 結束後台內數量，並更新 Supabase {bizDate} 到{" "}
+            {affectedStartDate}；試算表仍需另外重建。
           </div>
         </section>
       )}
