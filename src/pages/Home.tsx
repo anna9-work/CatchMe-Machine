@@ -13,6 +13,7 @@ type Props = {
   onInboundClick: () => void
   onAdjustmentClick: () => void
   onLineBotClick: () => void
+  onInventoryAuditClick: () => void
 }
 
 type ActionCard = {
@@ -45,6 +46,7 @@ export default function Home({
   onInboundClick,
   onAdjustmentClick,
   onLineBotClick,
+  onInventoryAuditClick,
 }: Props) {
   const todayText = getTaipeiDisplayDate()
   const businessDate = getBusinessDateValue()
@@ -136,6 +138,13 @@ export default function Home({
       subtitle: "日報 / 台內校正",
       accent: "#f7c873",
       onClick: onMachineProfitClick,
+    },
+    {
+      code: "CHK",
+      title: "庫存盤點",
+      subtitle: "全店盲盤 / 審核調整",
+      accent: "#34d399",
+      onClick: onInventoryAuditClick,
     },
     {
       code: "BOT",

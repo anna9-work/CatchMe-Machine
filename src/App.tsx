@@ -12,6 +12,7 @@ import ProductManage from "./pages/ProductManage"
 import InboundPage from "./pages/InboundPage"
 import AdjustmentPage from "./pages/AdjustmentPage"
 import LineBotPage from "./pages/LineBotPage"
+import InventoryAuditPage from "./pages/InventoryAuditPage"
 import { supabase } from "./lib/supabase"
 
 type Page =
@@ -26,6 +27,7 @@ type Page =
   | "inbound"
   | "adjustment"
   | "lineBot"
+  | "inventoryAudit"
 
 const GROUP_CODE = "catch_0001"
 
@@ -135,6 +137,10 @@ function App() {
     return <LineBotPage onBack={() => setPage("home")} />
   }
 
+  if (page === "inventoryAudit") {
+    return <InventoryAuditPage onBack={() => setPage("home")} />
+  }
+
   return (
     <>
       {error && (
@@ -159,6 +165,7 @@ function App() {
         onInboundClick={() => setPage("inbound")}
         onAdjustmentClick={() => setPage("adjustment")}
         onLineBotClick={() => setPage("lineBot")}
+        onInventoryAuditClick={() => setPage("inventoryAudit")}
       />
     </>
   )
