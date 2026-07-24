@@ -49,6 +49,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
   const [search, setSearch] = useState("")
   const [selectedItem, setSelectedItem] = useState<AdjustItem | null>(null)
   const [correctedInnerQty, setCorrectedInnerQty] = useState("")
+  const [correctedGroundQty, setCorrectedGroundQty] = useState("")
   const [note, setNote] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -110,6 +111,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
       setMessage("")
       setSelectedItem(null)
       setCorrectedInnerQty("")
+      setCorrectedGroundQty("")
 
       const { data: lifecycleData, error: lifecycleError } = await supabase
         .from("machine_lifecycles")
@@ -228,6 +230,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
     setCorrectedInnerQty(
       String(item.theoretical_inner_qty ?? item.initial_inner_qty ?? 0)
     )
+    setCorrectedGroundQty(String(item.theoretical_ground_qty ?? 0))
     setMessage("")
     setError("")
   }
@@ -238,10 +241,16 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
       return
     }
 
-    const qty = Number(correctedInnerQty)
+    const innerQty = Number(correctedInnerQty)
+    const groundQty = Number(correctedGroundQty)
 
-    if (!Number.isInteger(qty) || qty < 0) {
+    if (!Number.isInteger(innerQty) || innerQty < 0) {
       setError("台內數量請輸入 0 以上的整數")
+      return
+    }
+
+    if (!Number.isInteger(groundQty) || groundQty < 0) {
+      setError("台頂數量請輸入 0 以上的整數")
       return
     }
 
@@ -257,7 +266,8 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
           p_biz_date: bizDate,
           p_machine_no: selectedItem.machine_no,
           p_sku: selectedItem.product_sku,
-          p_corrected_inner_qty: qty,
+          p_corrected_inner_qty: innerQty,
+          p_corrected_ground_qty: groundQty,
           p_note: note.trim() || null,
           p_created_by: "webapp",
         }
@@ -275,13 +285,13 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
       )
 
       if (rebuildError) {
-        setMessage(`已儲存 ${bizDate} 結束台內校正，但 Supabase 日結更新失敗`)
+        setMessage(`已儲存 ${bizDate} 結束台內＋台頂校正，但 Supabase 日結更新失敗`)
         setError(rebuildError.message)
         return
       }
 
       setMessage(
-        `已儲存 ${bizDate} 結束台內校正，Supabase 日結已更新至 ${affectedStartDate}`
+        `已儲存 ${bizDate} 結束台內＋台頂校正，Supabase 日結已更新至 ${affectedStartDate}`
       )
       await loadItems()
     } catch (err) {
@@ -300,8 +310,8 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
         </button>
 
         <div style={titleBlockStyle}>
-          <h1 style={titleStyle}>台內校正</h1>
-          <div style={subTitleStyle}>機台日結數量</div>
+          <h1 style={titleStyle}>台內＋台頂校正</h1>
+          <div style={subTitleStyle}>台內＋台頂日結數量</div>
         </div>
 
         <button onClick={loadItems} disabled={loading} style={refreshButtonStyle}>
@@ -324,7 +334,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
         <div style={rebuildInfoStyle}>
           <div style={rebuildInfoRowStyle}>
             <span>寫入</span>
-            <strong>{bizDate} 結束台內</strong>
+            <strong>{bizDate} 結束台內＋台頂</strong>
           </div>
           <div style={rebuildInfoRowStyle}>
             <span>更新</span>
@@ -334,7 +344,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
           </div>
           <div style={rebuildInfoRowStyle}>
             <span>影響</span>
-            <strong>{affectedStartDate} 起的損益 F 欄</strong>
+            <strong>{affectedStartDate} 起的損益台內 / 台頂</strong>
           </div>
         </div>
 
@@ -346,6 +356,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
             setSelectedItem(null)
             setSearch("")
             setCorrectedInnerQty("")
+            setCorrectedGroundQty("")
           }}
           style={selectStyle}
           disabled={loading || machineNos.length === 0}
@@ -364,6 +375,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
             setSearch(event.target.value)
             setSelectedItem(null)
             setCorrectedInnerQty("")
+            setCorrectedGroundQty("")
           }}
           placeholder="SKU / 品名"
           style={inputStyle}
@@ -438,6 +450,7 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
               onClick={() => {
                 setSelectedItem(null)
                 setCorrectedInnerQty("")
+                setCorrectedGroundQty("")
               }}
               style={clearButtonStyle}
             >
@@ -482,6 +495,16 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
             style={inputStyle}
           />
 
+          <label style={labelStyle}>校正後台頂數量</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={correctedGroundQty}
+            onChange={(event) => setCorrectedGroundQty(event.target.value)}
+            style={inputStyle}
+          />
+
           <label style={labelStyle}>備註</label>
           <input
             value={note}
@@ -502,8 +525,8 @@ export default function MachineInnerAdjustPage({ onBack }: Props) {
           </button>
 
           <div style={detailHintStyle}>
-            送出後會寫入 {bizDate} 結束後台內數量，並更新 Supabase {bizDate} 到{" "}
-            {affectedStartDate}；試算表仍需另外重建。
+            送出後會寫入 {bizDate} 結束後台內＋台頂數量，並更新 Supabase{" "}
+            {bizDate} 到 {affectedStartDate}；試算表仍需另外重建。
           </div>
         </section>
       )}
