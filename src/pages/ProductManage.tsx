@@ -359,6 +359,31 @@ export default function ProductManage({ onBack }: Props) {
       setError("")
       setMessage("")
 
+      const { data: ledgerRows, error: ledgerError } = await supabase
+        .from("inventory_ledger")
+        .select("id")
+        .eq("product_sku", product.product_sku)
+        .limit(1)
+
+      if (ledgerError) throw ledgerError
+
+      if ((ledgerRows ?? []).length > 0) {
+        const { error: disableError } = await supabase
+          .from("products")
+          .update({
+            enabled: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("product_sku", product.product_sku)
+
+        if (disableError) throw disableError
+
+        await loadProducts()
+        setMessage("此商品已有庫存紀錄，不能真刪除，已改為停用")
+        closeDetail()
+        return
+      }
+
       const { error: barcodeError } = await supabase
         .from("product_barcodes")
         .delete()
