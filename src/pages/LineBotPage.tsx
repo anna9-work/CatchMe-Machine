@@ -5,9 +5,6 @@ type Props = {
   onBack: () => void
 }
 
-type TypeFilter = "all" | "inbound" | "outbound" | "voided"
-type WarehouseFilter = "all" | "main" | "withdraw" | "swap" | "onsite"
-
 type LedgerRow = {
   id: number
   group_code: string
@@ -47,9 +44,6 @@ const VOIDABLE_SOURCES = ["app_inbound", "APP_INBOUND", "line_outbound", "LINE_O
 
 export default function LineBotPage({ onBack }: Props) {
   const [businessDate, setBusinessDate] = useState(() => getBusinessDateText())
-  const [keyword, setKeyword] = useState("")
-  const [warehouse, setWarehouse] = useState<WarehouseFilter>("all")
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [products, setProducts] = useState<ProductMap>({})
   const [followingMap, setFollowingMap] = useState<FollowingMap>({})
@@ -65,26 +59,8 @@ export default function LineBotPage({ onBack }: Props) {
   const todayBusinessDate = getBusinessDateText()
 
   const filteredRows = useMemo(() => {
-    const value = keyword.trim().toLowerCase()
-
-    return rows.filter((row) => {
-      const productName = products[row.product_sku]?.product_name ?? ""
-      const direction = getDirection(row)
-      const isVoided = Boolean(row.voided_by_id)
-
-      if (typeFilter === "inbound" && direction !== "in") return false
-      if (typeFilter === "outbound" && direction !== "out") return false
-      if (typeFilter === "voided" && !isVoided) return false
-
-      if (!value) return true
-
-      return (
-        String(row.id).includes(value) ||
-        row.product_sku.toLowerCase().includes(value) ||
-        productName.toLowerCase().includes(value)
-      )
-    })
-  }, [keyword, products, rows, typeFilter])
+    return rows
+  }, [rows])
 
   const summary = useMemo(() => {
     return filteredRows.reduce(
@@ -102,14 +78,14 @@ export default function LineBotPage({ onBack }: Props) {
     )
   }, [filteredRows])
 
-  async function loadRecords() {
+  async function loadRecords(nextBusinessDate = businessDate) {
     try {
       setLoading(true)
       setError("")
       setMessage("")
 
-      const { start, end } = getBusinessDateRange(businessDate)
-      let query = supabase
+      const { start, end } = getBusinessDateRange(nextBusinessDate)
+      const { data, error: ledgerError } = await supabase
         .from("inventory_ledger")
         .select(
           "id,group_code,warehouse_code,product_sku,in_box,in_piece,out_box,out_piece,unit_cost_piece,in_amount,out_amount,source,created_at,void_of_id,voided_by_id"
@@ -120,12 +96,6 @@ export default function LineBotPage({ onBack }: Props) {
         .lt("created_at", end)
         .order("created_at", { ascending: false })
         .limit(160)
-
-      if (warehouse !== "all") {
-        query = query.eq("warehouse_code", warehouse)
-      }
-
-      const { data, error: ledgerError } = await query
 
       if (ledgerError) throw ledgerError
 
@@ -142,6 +112,11 @@ export default function LineBotPage({ onBack }: Props) {
     } finally {
       setLoading(false)
     }
+  }
+
+  function handleBusinessDateChange(value: string) {
+    setBusinessDate(value)
+    void loadRecords(value)
   }
 
   async function loadProducts(nextRows: LedgerRow[]) {
@@ -279,60 +254,15 @@ export default function LineBotPage({ onBack }: Props) {
         {error && <div style={errorStyle}>{error}</div>}
 
         <section style={filterPanelStyle}>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>日期</label>
-            <input
-              value={businessDate}
-              onChange={(event) => setBusinessDate(event.target.value)}
-              type="date"
-              style={inputStyle}
-            />
-          </div>
+          <input
+            aria-label="日期"
+            value={businessDate}
+            onChange={(event) => handleBusinessDateChange(event.target.value)}
+            type="date"
+            style={{ ...inputStyle, ...dateInputStyle }}
+          />
 
-          <div style={fieldStyle}>
-            <label style={labelStyle}>關鍵字</label>
-            <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="例如 a564 / 垃圾袋 / 3108"
-              style={inputStyle}
-            />
-          </div>
-
-          <div style={compactGridStyle}>
-            <div style={fieldStyle}>
-              <label style={labelStyle}>倉庫</label>
-              <select
-                value={warehouse}
-                onChange={(event) => setWarehouse(event.target.value as WarehouseFilter)}
-                style={inputStyle}
-              >
-                <option value="all">全部</option>
-                <option value="main">總倉</option>
-                <option value="withdraw">撤台</option>
-                <option value="swap">夾換品</option>
-                <option value="onsite">現場</option>
-              </select>
-            </div>
-
-            <div style={fieldStyle}>
-              <label style={labelStyle}>類型</label>
-              <select
-                value={typeFilter}
-                onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
-                style={inputStyle}
-              >
-                <option value="all">全部</option>
-                <option value="inbound">入庫</option>
-                <option value="outbound">出庫</option>
-                <option value="voided">已作廢</option>
-              </select>
-            </div>
-          </div>
-
-          <button disabled={loading} onClick={() => void loadRecords()} style={queryButtonStyle}>
-            {loading ? "查詢中..." : "查詢"}
-          </button>
+          {loading && <div style={loadingHintStyle}>查詢中...</div>}
         </section>
 
         <div style={summaryRowStyle}>
@@ -561,7 +491,7 @@ const pageStyle: CSSProperties = {
   minHeight: "100dvh",
   background: "#0f0f0f",
   color: "#fff",
-  padding: "calc(env(safe-area-inset-top, 0px) + 24px) 16px 24px",
+  padding: "calc(env(safe-area-inset-top, 0px) + 12px) 14px 22px",
   boxSizing: "border-box",
   fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
 }
@@ -574,120 +504,103 @@ const contentStyle: CSSProperties = {
 
 const topBarStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "36px minmax(0, 1fr) 36px",
+  gridTemplateColumns: "40px minmax(0, 1fr) 40px",
   alignItems: "center",
-  gap: 10,
-  marginBottom: 14,
+  gap: 8,
+  marginBottom: 10,
 }
 
 const topIconButtonStyle: CSSProperties = {
-  width: 36,
-  height: 36,
+  width: 40,
+  height: 40,
   border: "none",
-  borderRadius: 12,
+  borderRadius: 10,
   background: "transparent",
   color: "#fff",
-  fontSize: 22,
+  fontSize: 24,
   lineHeight: 1,
 }
 
 const pageTitleStyle: CSSProperties = {
   margin: 0,
   color: "#fff",
-  fontSize: 22,
+  fontSize: 21,
   fontWeight: 900,
   textAlign: "center",
 }
 
 const filterPanelStyle: CSSProperties = {
   display: "grid",
-  gap: 10,
-  border: "1px solid #333",
-  borderRadius: 18,
-  background: "#171717",
-  padding: 14,
-  marginBottom: 12,
-}
-
-const fieldStyle: CSSProperties = {
-  display: "grid",
-  gap: 6,
-}
-
-const compactGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 10,
-}
-
-const labelStyle: CSSProperties = {
-  color: "#bbb",
-  fontSize: 13,
-  fontWeight: 800,
+  gap: 8,
+  padding: "0 0 8px",
+  marginBottom: 8,
 }
 
 const inputStyle: CSSProperties = {
   width: "100%",
-  height: 42,
-  borderRadius: 12,
+  height: 38,
+  borderRadius: 10,
   border: "1px solid #3c3c3c",
   background: "#242424",
   color: "#fff",
-  fontSize: 16,
-  padding: "0 12px",
+  fontSize: 14,
+  padding: "0 10px",
   boxSizing: "border-box",
 }
 
-const queryButtonStyle: CSSProperties = {
+const dateInputStyle: CSSProperties = {
+  textAlign: "center",
+  fontWeight: 800,
+}
+
+const loadingHintStyle: CSSProperties = {
   width: "100%",
-  minHeight: 44,
-  border: "none",
-  borderRadius: 14,
-  background: "#5aa2ff",
-  color: "#fff",
-  fontSize: 16,
-  fontWeight: 900,
+  color: "#9dccff",
+  fontSize: 12,
+  fontWeight: 800,
+  textAlign: "center",
 }
 
 const summaryRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 8,
+  gap: 7,
   color: "#aaa",
-  fontSize: 13,
+  fontSize: 12,
   fontWeight: 800,
-  margin: "0 2px 12px",
+  margin: "0 2px 10px",
 }
 
 const recordListStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
+  gap: 9,
 }
 
 const recordCardStyle: CSSProperties = {
   border: "1px solid #333",
-  borderRadius: 18,
+  borderRadius: 14,
   background: "#171717",
-  padding: 14,
+  padding: 10,
 }
 
 const cardTopStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "44px minmax(68px, auto) minmax(50px, auto) minmax(0, 1fr) auto",
+  gridTemplateColumns: "34px minmax(60px, auto) minmax(42px, auto) minmax(0, 1fr) auto",
   alignItems: "center",
-  gap: 10,
-  marginBottom: 14,
+  gap: 7,
+  marginBottom: 9,
 }
 
 const inboundMarkStyle: CSSProperties = {
   display: "grid",
   placeItems: "center",
-  width: 38,
-  height: 38,
+  width: 30,
+  height: 30,
   borderRadius: 999,
   background: "rgba(90,162,255,0.18)",
   color: "#9dccff",
   border: "1px solid rgba(90,162,255,0.34)",
+  fontSize: 13,
   fontWeight: 900,
 }
 
@@ -700,102 +613,102 @@ const outboundMarkStyle: CSSProperties = {
 
 const topMetaStyle: CSSProperties = {
   color: "#d5d5d5",
-  fontSize: 14,
+  fontSize: 12,
   fontWeight: 900,
   whiteSpace: "nowrap",
 }
 
 const amountStyle: CSSProperties = {
   color: "#e5e5e5",
-  fontSize: 18,
+  fontSize: 14,
   fontWeight: 950,
   textAlign: "right",
   whiteSpace: "nowrap",
 }
 
 const voidButtonStyle: CSSProperties = {
-  minWidth: 64,
-  height: 40,
+  minWidth: 50,
+  height: 32,
   border: "none",
-  borderRadius: 14,
+  borderRadius: 10,
   background: "#ef4444",
   color: "#fff",
-  fontSize: 15,
+  fontSize: 13,
   fontWeight: 900,
 }
 
 const disabledVoidStyle: CSSProperties = {
-  minWidth: 64,
-  minHeight: 40,
+  minWidth: 50,
+  minHeight: 32,
   display: "grid",
   placeItems: "center",
-  borderRadius: 14,
+  borderRadius: 10,
   background: "#2a2a2a",
   color: "#8e8e8e",
-  fontSize: 13,
+  fontSize: 12,
   fontWeight: 900,
-  padding: "0 8px",
+  padding: "0 7px",
   boxSizing: "border-box",
 }
 
 const skuStyle: CSSProperties = {
   color: "#fff",
-  fontSize: 22,
+  fontSize: 18,
   fontWeight: 950,
   overflowWrap: "anywhere",
 }
 
 const nameStyle: CSSProperties = {
   color: "#ddd",
-  fontSize: 17,
+  fontSize: 14,
   fontWeight: 850,
-  marginTop: 8,
+  marginTop: 5,
   overflowWrap: "anywhere",
 }
 
 const cardBottomStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
-  gap: 10,
+  gap: 8,
   alignItems: "end",
-  marginTop: 14,
+  marginTop: 9,
 }
 
 const qtyBoxStyle: CSSProperties = {
   border: "1px solid #2e2e2e",
-  borderRadius: 14,
+  borderRadius: 11,
   background: "#111",
-  padding: "10px 12px",
+  padding: "7px 9px",
   minWidth: 0,
 }
 
 const qtyLabelStyle: CSSProperties = {
   color: "#bbb",
-  fontSize: 13,
+  fontSize: 12,
   fontWeight: 850,
-  marginRight: 10,
+  marginRight: 8,
 }
 
 const qtyValueStyle: CSSProperties = {
   color: "#fff",
-  fontSize: 22,
+  fontSize: 18,
   fontWeight: 950,
 }
 
 const idStyle: CSSProperties = {
   color: "#aaa",
-  fontSize: 17,
+  fontSize: 14,
   fontWeight: 900,
-  paddingBottom: 11,
+  paddingBottom: 8,
 }
 
 const voidInfoStyle: CSSProperties = {
-  borderRadius: 12,
+  borderRadius: 10,
   background: "rgba(148,163,184,0.1)",
   color: "#aaa",
-  padding: 10,
-  fontSize: 13,
-  marginTop: 12,
+  padding: 8,
+  fontSize: 12,
+  marginTop: 8,
 }
 
 const emptyStyle: CSSProperties = {
