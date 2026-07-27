@@ -40,7 +40,31 @@ type ProductMap = Record<string, ProductInfo>
 type FollowingMap = Record<number, boolean>
 
 const GROUP_CODE = "catch_0001"
-const VOIDABLE_SOURCES = ["app_inbound", "APP_INBOUND", "line_outbound", "LINE_OUTBOUND"]
+const RECORD_SOURCES = [
+  "app_inbound",
+  "APP_INBOUND",
+  "backfill_inbound",
+  "line_outbound",
+  "LINE_OUTBOUND",
+  "backfill_outbound",
+  "tx_void",
+  "manual_adjustment",
+]
+const VOIDABLE_SOURCES = [
+  "app_inbound",
+  "APP_INBOUND",
+  "backfill_inbound",
+  "line_outbound",
+  "LINE_OUTBOUND",
+  "backfill_outbound",
+]
+const CORRECTION_REASON_OPTIONS = [
+  "作廢單錯帳",
+  "逾期交易修正",
+  "後續已有交易，無法作廢",
+  "盤點差異修正",
+  "其他",
+]
 
 export default function LineBotPage({ onBack }: Props) {
   const [businessDate, setBusinessDate] = useState(() => getBusinessDateText())
@@ -49,6 +73,12 @@ export default function LineBotPage({ onBack }: Props) {
   const [followingMap, setFollowingMap] = useState<FollowingMap>({})
   const [loading, setLoading] = useState(false)
   const [voidingId, setVoidingId] = useState<number | null>(null)
+  const [selectedCorrectionRow, setSelectedCorrectionRow] = useState<LedgerRow | null>(
+    null
+  )
+  const [correctionReason, setCorrectionReason] = useState(CORRECTION_REASON_OPTIONS[0])
+  const [correctionNote, setCorrectionNote] = useState("")
+  const [correcting, setCorrecting] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
 
@@ -91,7 +121,7 @@ export default function LineBotPage({ onBack }: Props) {
           "id,group_code,warehouse_code,product_sku,in_box,in_piece,out_box,out_piece,unit_cost_piece,in_amount,out_amount,source,created_at,void_of_id,voided_by_id"
         )
         .eq("group_code", GROUP_CODE)
-        .in("source", VOIDABLE_SOURCES)
+        .in("source", RECORD_SOURCES)
         .gte("created_at", start)
         .lt("created_at", end)
         .order("created_at", { ascending: false })
@@ -199,6 +229,28 @@ export default function LineBotPage({ onBack }: Props) {
     return { canVoid: true, label: "作廢", tone: "danger" }
   }
 
+  function openCorrection(row: LedgerRow) {
+    setSelectedCorrectionRow(row)
+    setCorrectionReason(
+      row.source.toLowerCase() === "tx_void"
+        ? "作廢單錯帳"
+        : getVoidState(row).label === "有後續"
+          ? "後續已有交易，無法作廢"
+          : getLedgerBusinessDate(row.created_at) !== todayBusinessDate
+            ? "逾期交易修正"
+            : "其他"
+    )
+    setCorrectionNote("")
+    setMessage("")
+    setError("")
+  }
+
+  function closeCorrection() {
+    setSelectedCorrectionRow(null)
+    setCorrectionNote("")
+    setError("")
+  }
+
   async function voidTransaction(row: LedgerRow) {
     const state = getVoidState(row)
     if (!state.canVoid) return
@@ -232,116 +284,290 @@ export default function LineBotPage({ onBack }: Props) {
     }
   }
 
+  async function submitManualAdjustment() {
+    if (!selectedCorrectionRow) return
+
+    if (!correctionNote.trim()) {
+      setError("特殊校正必須填寫備註")
+      return
+    }
+
+    const proposal = getCorrectionProposal(selectedCorrectionRow)
+    const ok = window.confirm(
+      `確定送出特殊校正？\n原紀錄 #${selectedCorrectionRow.id} ${getDirectionLabel(
+        getDirection(selectedCorrectionRow)
+      )} ${formatQty(proposal.originalBox)}箱 ${formatQty(
+        proposal.originalPiece
+      )}散\n將建立 ${proposal.adjustDirectionLabel} ${formatQty(
+        proposal.adjustBox
+      )}箱 ${formatQty(proposal.adjustPiece)}散。`
+    )
+    if (!ok) return
+
+    try {
+      setCorrecting(true)
+      setError("")
+      setMessage("")
+
+      const { error: adjustmentError } = await supabase.rpc(
+        "rpc_manual_adjust_inventory_from_ledger",
+        {
+          p_group: GROUP_CODE,
+          p_ledger_id: selectedCorrectionRow.id,
+          p_reason: correctionReason,
+          p_note: correctionNote.trim(),
+          p_actor: "app_transaction_page",
+        }
+      )
+
+      if (adjustmentError) throw adjustmentError
+
+      setMessage(`已建立 #${selectedCorrectionRow.id} 的特殊校正`)
+      setSelectedCorrectionRow(null)
+      setCorrectionNote("")
+      await loadRecords()
+    } catch (err) {
+      console.error(err)
+      setError(formatAdjustmentError(err))
+    } finally {
+      setCorrecting(false)
+    }
+  }
+
   return (
     <div style={pageStyle}>
       <div style={contentStyle}>
         <header style={topBarStyle}>
-          <button onClick={onBack} style={topIconButtonStyle} aria-label="返回">
+          <button
+            onClick={selectedCorrectionRow ? closeCorrection : onBack}
+            style={topIconButtonStyle}
+            aria-label="返回"
+          >
             ←
           </button>
-          <h1 style={pageTitleStyle}>交易紀錄</h1>
-          <button
-            onClick={() => void loadRecords()}
-            style={topIconButtonStyle}
-            aria-label="重新整理"
-            disabled={loading}
-          >
-            ↻
-          </button>
+          <h1 style={pageTitleStyle}>
+            {selectedCorrectionRow ? "特殊校正" : "交易紀錄"}
+          </h1>
+          {selectedCorrectionRow ? (
+            <span />
+          ) : (
+            <button
+              onClick={() => void loadRecords()}
+              style={topIconButtonStyle}
+              aria-label="重新整理"
+              disabled={loading}
+            >
+              ↻
+            </button>
+          )}
         </header>
 
         {message && <div style={messageStyle}>{message}</div>}
         {error && <div style={errorStyle}>{error}</div>}
 
-        <section style={filterPanelStyle}>
-          <input
-            aria-label="日期"
-            value={businessDate}
-            onChange={(event) => handleBusinessDateChange(event.target.value)}
-            type="date"
-            style={{ ...inputStyle, ...dateInputStyle }}
+        {selectedCorrectionRow ? (
+          <CorrectionPanel
+            row={selectedCorrectionRow}
+            product={products[selectedCorrectionRow.product_sku]}
+            reason={correctionReason}
+            note={correctionNote}
+            correcting={correcting}
+            onReasonChange={setCorrectionReason}
+            onNoteChange={setCorrectionNote}
+            onSubmit={submitManualAdjustment}
           />
+        ) : (
+          <>
+            <section style={filterPanelStyle}>
+              <input
+                aria-label="日期"
+                value={businessDate}
+                onChange={(event) => handleBusinessDateChange(event.target.value)}
+                type="date"
+                style={{ ...inputStyle, ...dateInputStyle }}
+              />
 
-          {loading && <div style={loadingHintStyle}>查詢中...</div>}
-        </section>
+              {loading && <div style={loadingHintStyle}>查詢中...</div>}
+            </section>
 
-        <div style={summaryRowStyle}>
-          <span>入庫 {summary.inbound}</span>
-          <span>出庫 {summary.outbound}</span>
-          <span>已作廢 {summary.voided}</span>
-          <span>{filteredRows.length} 筆</span>
-        </div>
+            <div style={summaryRowStyle}>
+              <span>入庫 {summary.inbound}</span>
+              <span>出庫 {summary.outbound}</span>
+              <span>已作廢 {summary.voided}</span>
+              <span>{filteredRows.length} 筆</span>
+            </div>
 
-        {loading && <div style={emptyStyle}>讀取交易紀錄中...</div>}
+            {loading && <div style={emptyStyle}>讀取交易紀錄中...</div>}
 
-        {!loading && filteredRows.length === 0 && (
-          <div style={emptyStyle}>目前沒有符合條件的交易紀錄</div>
-        )}
+            {!loading && filteredRows.length === 0 && (
+              <div style={emptyStyle}>目前沒有符合條件的交易紀錄</div>
+            )}
 
-        {!loading && filteredRows.length > 0 && (
-          <section style={recordListStyle}>
-            {filteredRows.map((row) => {
-              const product = products[row.product_sku]
-              const direction = getDirection(row)
-              const qtyBox = direction === "in" ? row.in_box : row.out_box
-              const qtyPiece = direction === "in" ? row.in_piece : row.out_piece
-              const amount = getDisplayAmount(row, product)
-              const voidState = getVoidState(row)
+            {!loading && filteredRows.length > 0 && (
+              <section style={recordListStyle}>
+                {filteredRows.map((row) => {
+                  const product = products[row.product_sku]
+                  const direction = getDirection(row)
+                  const qtyBox = direction === "in" ? row.in_box : row.out_box
+                  const qtyPiece = direction === "in" ? row.in_piece : row.out_piece
+                  const amount = getDisplayAmount(row, product)
+                  const voidState = getVoidState(row)
 
-              return (
-                <article key={row.id} style={recordCardStyle}>
-                  <div style={cardTopStyle}>
-                    <span
-                      style={direction === "in" ? inboundMarkStyle : outboundMarkStyle}
-                    >
-                      {direction === "in" ? "入" : "出"}
-                    </span>
+                  return (
+                    <article key={row.id} style={recordCardStyle}>
+                      <div style={cardTopStyle}>
+                        <span
+                          style={direction === "in" ? inboundMarkStyle : outboundMarkStyle}
+                        >
+                          {direction === "in" ? "入" : "出"}
+                        </span>
 
-                    <span style={topMetaStyle}>{formatTaipeiShort(row.created_at)}</span>
-                    <span style={topMetaStyle}>{formatWarehouse(row.warehouse_code)}</span>
-                    <span style={amountStyle}>$ {formatMoney(amount)}</span>
+                        <span style={topMetaStyle}>{formatTaipeiShort(row.created_at)}</span>
+                        <span style={topMetaStyle}>{formatWarehouse(row.warehouse_code)}</span>
+                        <span style={amountStyle}>$ {formatMoney(amount)}</span>
 
-                    {voidState.canVoid ? (
-                      <button
-                        disabled={voidingId === row.id}
-                        onClick={() => void voidTransaction(row)}
-                        style={voidButtonStyle}
-                      >
-                        {voidingId === row.id ? "處理中" : "作廢"}
-                      </button>
-                    ) : (
-                      <span style={disabledVoidStyle}>{voidState.label}</span>
-                    )}
-                  </div>
+                        {voidState.canVoid ? (
+                          <button
+                            disabled={voidingId === row.id}
+                            onClick={() => void voidTransaction(row)}
+                            style={voidButtonStyle}
+                          >
+                            {voidingId === row.id ? "處理中" : "作廢"}
+                          </button>
+                        ) : (
+                          <span style={disabledVoidStyle}>{voidState.label}</span>
+                        )}
+                      </div>
 
-                  <div style={skuStyle}>{row.product_sku}</div>
-                  <div style={nameStyle}>{product?.product_name || "未命名商品"}</div>
+                      <div style={skuStyle}>{row.product_sku}</div>
+                      <div style={nameStyle}>{product?.product_name || "未命名商品"}</div>
 
-                  <div style={cardBottomStyle}>
-                    <div style={qtyBoxStyle}>
-                      <span style={qtyLabelStyle}>箱</span>
-                      <strong style={qtyValueStyle}>{formatQty(qtyBox)}</strong>
-                    </div>
-                    <div style={qtyBoxStyle}>
-                      <span style={qtyLabelStyle}>散</span>
-                      <strong style={qtyValueStyle}>{formatQty(qtyPiece)}</strong>
-                    </div>
-                    <div style={idStyle}>#{row.id}</div>
-                  </div>
+                      <div style={cardBottomStyle}>
+                        <div style={qtyBoxStyle}>
+                          <span style={qtyLabelStyle}>箱</span>
+                          <strong style={qtyValueStyle}>{formatQty(qtyBox)}</strong>
+                        </div>
+                        <div style={qtyBoxStyle}>
+                          <span style={qtyLabelStyle}>散</span>
+                          <strong style={qtyValueStyle}>{formatQty(qtyPiece)}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openCorrection(row)}
+                          style={idButtonStyle}
+                        >
+                          #{row.id}
+                        </button>
+                      </div>
 
-                  {row.voided_by_id && (
-                    <div style={voidInfoStyle}>作廢回沖紀錄：#{row.voided_by_id}</div>
-                  )}
+                      {row.voided_by_id && (
+                        <div style={voidInfoStyle}>作廢回沖紀錄：#{row.voided_by_id}</div>
+                      )}
 
-                  {!row.voided_by_id && !voidState.canVoid && (
-                    <div style={voidInfoStyle}>{getDisabledReason(voidState.label)}</div>
-                  )}
-                </article>
-              )
-            })}
-          </section>
+                      {!row.voided_by_id && !voidState.canVoid && (
+                        <div style={voidInfoStyle}>{getDisabledReason(voidState.label)}</div>
+                      )}
+                    </article>
+                  )
+                })}
+              </section>
+            )}
+          </>
         )}
       </div>
+    </div>
+  )
+}
+
+type CorrectionPanelProps = {
+  row: LedgerRow
+  product?: ProductInfo
+  reason: string
+  note: string
+  correcting: boolean
+  onReasonChange: (value: string) => void
+  onNoteChange: (value: string) => void
+  onSubmit: () => void
+}
+
+function CorrectionPanel({
+  row,
+  product,
+  reason,
+  note,
+  correcting,
+  onReasonChange,
+  onNoteChange,
+  onSubmit,
+}: CorrectionPanelProps) {
+  const proposal = getCorrectionProposal(row)
+
+  return (
+    <section style={correctionPanelStyle}>
+      <div style={correctionNoticeStyle}>
+        特殊校正會新增一筆 manual_adjustment，並從原交易業務日重建日結。
+      </div>
+
+      <div style={detailGridStyle}>
+        <InfoItem label="交易編號" value={`#${row.id}`} />
+        <InfoItem label="來源" value={formatSource(row.source)} />
+        <InfoItem label="商品" value={`${row.product_sku} ${product?.product_name ?? ""}`} />
+        <InfoItem label="倉庫" value={formatWarehouse(row.warehouse_code)} />
+        <InfoItem
+          label="原紀錄"
+          value={`${getDirectionLabel(getDirection(row))} ${formatQty(
+            proposal.originalBox
+          )}箱 ${formatQty(proposal.originalPiece)}散`}
+        />
+        <InfoItem
+          label="建議校正"
+          value={`${proposal.adjustDirectionLabel} ${formatQty(
+            proposal.adjustBox
+          )}箱 ${formatQty(proposal.adjustPiece)}散`}
+        />
+      </div>
+
+      <label style={labelStyle}>原因</label>
+      <select
+        value={reason}
+        onChange={(event) => onReasonChange(event.target.value)}
+        style={inputStyle}
+      >
+        {CORRECTION_REASON_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+
+      <label style={labelStyle}>備註（必填）</label>
+      <textarea
+        value={note}
+        onChange={(event) => onNoteChange(event.target.value)}
+        placeholder="請輸入校正原因，例如：tx_void 重複計算造成庫存錯誤"
+        style={textareaStyle}
+      />
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={correcting}
+        style={{
+          ...submitCorrectionButtonStyle,
+          opacity: correcting ? 0.65 : 1,
+        }}
+      >
+        {correcting ? "送出中..." : "送出特殊校正"}
+      </button>
+    </section>
+  )
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={infoItemStyle}>
+      <div style={infoLabelStyle}>{label}</div>
+      <div style={infoValueStyle}>{value}</div>
     </div>
   )
 }
@@ -349,6 +575,26 @@ export default function LineBotPage({ onBack }: Props) {
 function getDirection(row: LedgerRow) {
   const hasIn = Number(row.in_box ?? 0) > 0 || Number(row.in_piece ?? 0) > 0
   return hasIn ? "in" : "out"
+}
+
+function getDirectionLabel(direction: "in" | "out") {
+  return direction === "in" ? "入庫" : "出庫"
+}
+
+function getCorrectionProposal(row: LedgerRow) {
+  const direction = getDirection(row)
+  const originalBox = direction === "in" ? row.in_box : row.out_box
+  const originalPiece = direction === "in" ? row.in_piece : row.out_piece
+  const adjustDirection = direction === "in" ? "out" : "in"
+
+  return {
+    originalBox,
+    originalPiece,
+    adjustDirection,
+    adjustDirectionLabel: adjustDirection === "in" ? "校正入庫" : "校正出庫",
+    adjustBox: originalBox,
+    adjustPiece: originalPiece,
+  }
 }
 
 function getDisplayAmount(row: LedgerRow, product?: ProductInfo) {
@@ -470,6 +716,21 @@ function formatWarehouse(code: string) {
   return names[code] ?? code
 }
 
+function formatSource(source: string) {
+  const labels: Record<string, string> = {
+    app_inbound: "入庫",
+    APP_INBOUND: "入庫",
+    backfill_inbound: "補入庫",
+    line_outbound: "LINE出庫",
+    LINE_OUTBOUND: "LINE出庫",
+    backfill_outbound: "補出庫",
+    tx_void: "作廢回沖",
+    manual_adjustment: "特殊校正",
+  }
+
+  return labels[source] ?? source
+}
+
 function formatVoidError(err: unknown) {
   const message = err instanceof Error ? err.message : "作廢失敗"
 
@@ -483,6 +744,22 @@ function formatVoidError(err: unknown) {
   }
   if (message.includes("INSUFFICIENT_BOX_FOR_VOID")) return "庫存箱數不足，不能作廢"
   if (message.includes("INSUFFICIENT_PIECE_FOR_VOID")) return "庫存散數不足，不能作廢"
+
+  return message
+}
+
+function formatAdjustmentError(err: unknown) {
+  const message = err instanceof Error ? err.message : "特殊校正失敗"
+
+  if (message.includes("ERR_LEDGER_NOT_FOUND")) return "找不到這筆交易"
+  if (message.includes("ERR_LEDGER_ALREADY_VOIDED")) return "已作廢的交易不能再特殊校正"
+  if (message.includes("ERR_COMPLEX_MOVEMENT_NOT_SUPPORTED")) {
+    return "箱轉散等複合異動不能用此頁特殊校正"
+  }
+  if (message.includes("ERR_REASON_REQUIRED")) return "請選擇校正原因"
+  if (message.includes("ERR_NOTE_REQUIRED")) return "特殊校正必須填寫備註"
+  if (message.includes("INSUFFICIENT_BOX")) return "庫存箱數不足，不能建立校正出庫"
+  if (message.includes("INSUFFICIENT_PIECE")) return "庫存散數不足，不能建立校正出庫"
 
   return message
 }
@@ -695,11 +972,15 @@ const qtyValueStyle: CSSProperties = {
   fontWeight: 950,
 }
 
-const idStyle: CSSProperties = {
-  color: "#aaa",
+const idButtonStyle: CSSProperties = {
+  alignSelf: "end",
+  border: "none",
+  background: "transparent",
+  color: "#9dccff",
   fontSize: 14,
-  fontWeight: 900,
-  paddingBottom: 8,
+  fontWeight: 950,
+  padding: "0 0 8px",
+  textDecoration: "underline",
 }
 
 const voidInfoStyle: CSSProperties = {
@@ -709,6 +990,78 @@ const voidInfoStyle: CSSProperties = {
   padding: 8,
   fontSize: 12,
   marginTop: 8,
+}
+
+const correctionPanelStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  border: "1px solid #333",
+  borderRadius: 16,
+  background: "#171717",
+  padding: 14,
+}
+
+const correctionNoticeStyle: CSSProperties = {
+  border: "1px solid rgba(90,162,255,0.28)",
+  borderRadius: 12,
+  background: "rgba(90,162,255,0.1)",
+  color: "#bfdbfe",
+  padding: 10,
+  fontSize: 13,
+  fontWeight: 850,
+  lineHeight: 1.5,
+}
+
+const detailGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+}
+
+const infoItemStyle: CSSProperties = {
+  border: "1px solid #2e2e2e",
+  borderRadius: 12,
+  background: "#111",
+  padding: "9px 10px",
+}
+
+const infoLabelStyle: CSSProperties = {
+  color: "#aaa",
+  fontSize: 12,
+  fontWeight: 850,
+  marginBottom: 4,
+}
+
+const infoValueStyle: CSSProperties = {
+  color: "#fff",
+  fontSize: 14,
+  fontWeight: 900,
+  overflowWrap: "anywhere",
+}
+
+const labelStyle: CSSProperties = {
+  color: "#ddd",
+  fontSize: 13,
+  fontWeight: 900,
+  marginTop: 4,
+}
+
+const textareaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 92,
+  height: "auto",
+  padding: 10,
+  resize: "vertical",
+  lineHeight: 1.5,
+}
+
+const submitCorrectionButtonStyle: CSSProperties = {
+  height: 46,
+  border: "none",
+  borderRadius: 13,
+  background: "#60a5fa",
+  color: "#fff",
+  fontSize: 15,
+  fontWeight: 950,
 }
 
 const emptyStyle: CSSProperties = {
