@@ -75,6 +75,9 @@ export default function MachineAuditClosePage({ onBack }: Props) {
   const summary = useMemo(() => {
     return items.reduce(
       (acc, item) => {
+        if (isCompleteItemInput(item)) {
+          acc.completedItems += 1
+        }
         acc.innerQty += readInputQty(item.corrected_inner_qty)
         acc.groundQty += calcCorrectedGroundQty(item)
         acc.totalQty +=
@@ -83,6 +86,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
         return acc
       },
       {
+        completedItems: 0,
         innerQty: 0,
         groundQty: 0,
         totalQty: 0,
@@ -124,9 +128,9 @@ export default function MachineAuditClosePage({ onBack }: Props) {
           audit_ground_qty: groundQty,
           outside_box: outsideBox,
           outside_piece: outsidePiece,
-          corrected_inner_qty: String(insidePiece),
-          corrected_ground_box: String(outsideBox),
-          corrected_ground_piece: String(outsidePiece),
+          corrected_inner_qty: "",
+          corrected_ground_box: "",
+          corrected_ground_piece: "",
         }
       })
 
@@ -191,20 +195,23 @@ export default function MachineAuditClosePage({ onBack }: Props) {
   }
 
   async function submitClose() {
-    const targetItems = items.filter((item) => {
-      return (
-        Number.isFinite(readInputQty(item.corrected_inner_qty)) &&
-        Number.isFinite(readInputQty(item.corrected_ground_box)) &&
-        Number.isFinite(readInputQty(item.corrected_ground_piece))
-      )
-    })
-
-    if (targetItems.length === 0) {
+    if (items.length === 0) {
       setError("沒有可以結算的機台盤點數據")
       return
     }
 
-    for (const item of targetItems) {
+    for (const item of items) {
+      if (
+        !isFilledNumber(item.corrected_inner_qty) ||
+        !isFilledNumber(item.corrected_ground_box) ||
+        !isFilledNumber(item.corrected_ground_piece)
+      ) {
+        setError(
+          `${item.machine_no} ${item.product_sku} 尚未填完整盤點數量，台內、台頂箱、台頂散都必填`
+        )
+        return
+      }
+
       const innerQty = Number(item.corrected_inner_qty)
       const groundBox = Number(item.corrected_ground_box)
       const groundPiece = Number(item.corrected_ground_piece)
@@ -226,7 +233,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
     }
 
     const confirmed = window.confirm(
-      `確定要結算 ${bizDate} 的機台盤點嗎？\n\n會寫入 ${targetItems.length} 筆台內＋台頂校正，並更新 ${bizDate} 到 ${affectedStartDate} 的生命週期日結。`
+      `確定要結算 ${bizDate} 的機台盤點嗎？\n\n會寫入 ${items.length} 筆台內＋台頂校正，並更新 ${bizDate} 到 ${affectedStartDate} 的生命週期日結。`
     )
 
     if (!confirmed) return
@@ -236,7 +243,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
       setError("")
       setMessage("")
 
-      for (const item of targetItems) {
+      for (const item of items) {
         const { error: saveError } = await supabase.rpc(
           "rpc_machine_inner_adjustment_upsert_v1",
           {
@@ -265,16 +272,15 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
       if (rebuildError) {
         setMessage(
-          `已寫入 ${targetItems.length} 筆盤點結算，但 Supabase 生命週期日結更新失敗`
+          `已寫入 ${items.length} 筆盤點結算，但 Supabase 生命週期日結更新失敗`
         )
         setError(rebuildError.message)
         return
       }
 
       setMessage(
-        `已完成 ${bizDate} 機台盤點結算，${targetItems.length} 筆台內＋台頂已寫入，日結已更新至 ${affectedStartDate}`
+        `已完成 ${bizDate} 機台盤點結算，${items.length} 筆台內＋台頂已寫入，日結已更新至 ${affectedStartDate}`
       )
-      await loadAuditRows()
     } catch (err) {
       console.error(err)
       setError(getErrorMessage(err, "機台盤點結算失敗"))
@@ -320,7 +326,8 @@ export default function MachineAuditClosePage({ onBack }: Props) {
           <div style={machineSummaryHeaderStyle}>
             <span style={machineSummaryTitleStyle}>全部機台</span>
             <span style={machineSummaryCountStyle}>
-              {machineGroups.length} 台 / {items.length} 項
+              {machineGroups.length} 台 / {items.length} 項 / 已填{" "}
+              {summary.completedItems}
             </span>
           </div>
 
@@ -376,7 +383,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                       </div>
                       <div style={nameStyle}>{item.product_name}</div>
                       <div style={readOnlyLineStyle}>
-                        台內 {formatQty(item.audit_inner_qty)} / 台頂{" "}
+                        原本：台內 {formatQty(item.audit_inner_qty)} / 台頂{" "}
                         {formatQty(item.outside_box)}箱{" "}
                         {formatQty(item.outside_piece)}散
                       </div>
@@ -389,6 +396,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                           type="number"
                           inputMode="numeric"
                           min={0}
+                          placeholder={formatQty(item.audit_inner_qty)}
                           value={item.corrected_inner_qty}
                           onChange={(event) =>
                             updateItemQty(
@@ -407,6 +415,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                           type="number"
                           inputMode="numeric"
                           min={0}
+                          placeholder={formatQty(item.outside_box)}
                           value={item.corrected_ground_box}
                           onChange={(event) =>
                             updateItemQty(
@@ -425,6 +434,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                           type="number"
                           inputMode="numeric"
                           min={0}
+                          placeholder={formatQty(item.outside_piece)}
                           value={item.corrected_ground_piece}
                           onChange={(event) =>
                             updateItemQty(
@@ -477,6 +487,20 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 function readInputQty(value: string) {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
+}
+
+function isFilledNumber(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === "") return false
+  return Number.isFinite(Number(trimmed))
+}
+
+function isCompleteItemInput(item: CloseItem) {
+  return (
+    isFilledNumber(item.corrected_inner_qty) &&
+    isFilledNumber(item.corrected_ground_box) &&
+    isFilledNumber(item.corrected_ground_piece)
+  )
 }
 
 function calcCorrectedGroundQty(item: CloseItem) {
