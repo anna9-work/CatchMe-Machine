@@ -8,6 +8,7 @@ import MachineManage from "./pages/MachineManage"
 import MachineDetail from "./pages/MachineDetail"
 import MachineProfitPage from "./pages/MachineProfitPage"
 import MachineInnerAdjustPage from "./pages/MachineInnerAdjustPage"
+import MachineAuditClosePage from "./pages/MachineAuditClosePage"
 import ProductManage from "./pages/ProductManage"
 import InboundPage from "./pages/InboundPage"
 import AdjustmentPage from "./pages/AdjustmentPage"
@@ -23,6 +24,7 @@ type Page =
   | "machineDetail"
   | "machineProfit"
   | "machineInnerAdjust"
+  | "machineAuditClose"
   | "products"
   | "inbound"
   | "adjustment"
@@ -113,12 +115,17 @@ function App() {
       <MachineProfitPage
         onBack={() => setPage("home")}
         onInnerAdjustClick={() => setPage("machineInnerAdjust")}
+        onAuditCloseClick={() => setPage("machineAuditClose")}
       />
     )
   }
 
   if (page === "machineInnerAdjust") {
     return <MachineInnerAdjustPage onBack={() => setPage("machineProfit")} />
+  }
+
+  if (page === "machineAuditClose") {
+    return <MachineAuditClosePage onBack={() => setPage("machineProfit")} />
   }
 
   if (page === "products") {

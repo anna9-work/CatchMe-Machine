@@ -4,6 +4,7 @@ import type { CSSProperties } from "react"
 type Props = {
   onBack: () => void
   onInnerAdjustClick: () => void
+  onAuditCloseClick: () => void
 }
 
 type ToolItem = {
@@ -17,8 +18,16 @@ type ToolItem = {
 export default function MachineProfitPage({
   onBack,
   onInnerAdjustClick,
+  onAuditCloseClick,
 }: Props) {
   const tools: ToolItem[] = [
+    {
+      code: "CLS",
+      title: "盤點結算",
+      subtitle: "用機台盤點台內 / 台頂結算生命週期",
+      accent: "#60a5fa",
+      onClick: onAuditCloseClick,
+    },
     {
       code: "ADJ",
       title: "台內校正",
