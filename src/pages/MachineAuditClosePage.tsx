@@ -37,8 +37,6 @@ type CloseItem = {
 export default function MachineAuditClosePage({ onBack }: Props) {
   const [bizDate, setBizDate] = useState(getBusinessDateValue())
   const [items, setItems] = useState<CloseItem[]>([])
-  const [selectedMachineNo, setSelectedMachineNo] = useState("")
-  const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(false)
   const [closingAudit, setClosingAudit] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -47,32 +45,35 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
   const affectedStartDate = addDays(bizDate, 1)
 
-  const machineNos = useMemo(() => {
-    return Array.from(new Set(items.map((item) => item.machine_no))).sort(
-      compareMachineNo
-    )
+  const machineGroups = useMemo(() => {
+    const groups = new Map<string, CloseItem[]>()
+
+    for (const item of items) {
+      const current = groups.get(item.machine_no) ?? []
+      current.push(item)
+      groups.set(item.machine_no, current)
+    }
+
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => compareMachineNo(a, b))
+      .map(([machineNo, machineItems]) => ({
+        machineNo,
+        items: machineItems.sort((a, b) =>
+          a.product_sku.localeCompare(b.product_sku, "zh-TW")
+        ),
+        innerQty: machineItems.reduce(
+          (sum, item) => sum + readInputQty(item.corrected_inner_qty),
+          0
+        ),
+        groundQty: machineItems.reduce(
+          (sum, item) => sum + calcCorrectedGroundQty(item),
+          0
+        ),
+      }))
   }, [items])
 
-  const filteredItems = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
-
-    return items.filter((item) => {
-      if (selectedMachineNo && item.machine_no !== selectedMachineNo) {
-        return false
-      }
-
-      if (!keyword) return true
-
-      return (
-        item.product_sku.toLowerCase().includes(keyword) ||
-        item.product_name.toLowerCase().includes(keyword) ||
-        item.machine_no.toLowerCase().includes(keyword)
-      )
-    })
-  }, [items, search, selectedMachineNo])
-
   const summary = useMemo(() => {
-    return filteredItems.reduce(
+    return items.reduce(
       (acc, item) => {
         acc.innerQty += readInputQty(item.corrected_inner_qty)
         acc.groundQty += calcCorrectedGroundQty(item)
@@ -87,7 +88,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
         totalQty: 0,
       }
     )
-  }, [filteredItems])
+  }, [items])
 
   useEffect(() => {
     loadAuditRows()
@@ -131,13 +132,6 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
       setItems(rows)
 
-      const nextMachineNos = Array.from(
-        new Set(rows.map((row) => row.machine_no))
-      ).sort(compareMachineNo)
-
-      setSelectedMachineNo((current) =>
-        nextMachineNos.includes(current) ? current : nextMachineNos[0] ?? ""
-      )
     } catch (err) {
       console.error(err)
       setError(getErrorMessage(err, "讀取機台盤點數據失敗"))
@@ -310,74 +304,24 @@ export default function MachineAuditClosePage({ onBack }: Props) {
       {error && <div style={errorStyle}>{error}</div>}
 
       <section style={panelStyle}>
-        <div style={controlGridStyle}>
-          <label style={fieldStyle}>
-            <span>結算日期</span>
-            <input
-              type="date"
-              value={bizDate}
-              onChange={(event) => setBizDate(event.target.value)}
-              style={inputStyle}
-            />
-          </label>
-
-          <label style={fieldStyle}>
-            <span>機台</span>
-            <select
-              value={selectedMachineNo}
-              onChange={(event) => setSelectedMachineNo(event.target.value)}
-              style={selectStyle}
-              disabled={loading || machineNos.length === 0}
-            >
-              <option value="">全部機台</option>
-              {machineNos.map((machineNo) => (
-                <option key={machineNo} value={machineNo}>
-                  {machineNo}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={fieldStyle}>
-            <span>搜尋</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="機台 / SKU / 品名"
-              style={inputStyle}
-            />
-          </label>
-        </div>
-
-        <div style={rebuildInfoStyle}>
-          <span>
-            寫入 <strong>{bizDate}</strong> 結束台內 / 台頂
-          </span>
-          <span>
-            更新生命週期 <strong>{bizDate}</strong> ～{" "}
-            <strong>{affectedStartDate}</strong>
-          </span>
-        </div>
-
-        <button
-          onClick={closeAuditSnapshot}
-          disabled={closingAudit || loading}
-          style={{
-            ...secondaryButtonStyle,
-            opacity: closingAudit || loading ? 0.7 : 1,
-          }}
-        >
-          {closingAudit ? "鎖定中..." : "鎖定盤點資料"}
-        </button>
+        <label style={fieldStyle}>
+          <span>結算日期</span>
+          <input
+            type="date"
+            value={bizDate}
+            onChange={(event) => setBizDate(event.target.value)}
+            style={inputStyle}
+          />
+        </label>
       </section>
 
       {!loading && (
         <section style={machineSummaryStyle}>
           <div style={machineSummaryHeaderStyle}>
-            <span style={machineSummaryTitleStyle}>
-              {selectedMachineNo ? `機台 ${selectedMachineNo}` : "全部機台"}
+            <span style={machineSummaryTitleStyle}>全部機台</span>
+            <span style={machineSummaryCountStyle}>
+              {machineGroups.length} 台 / {items.length} 項
             </span>
-            <span style={machineSummaryCountStyle}>{filteredItems.length} 項</span>
           </div>
 
           <div style={summaryStatGridStyle}>
@@ -399,101 +343,121 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
       {loading && <p style={mutedStyle}>載入盤點數據中...</p>}
 
-      {!loading && filteredItems.length === 0 && (
+      {!loading && items.length === 0 && (
         <p style={mutedStyle}>這天沒有可結算的機台盤點數據</p>
       )}
 
-      {!loading && filteredItems.length > 0 && (
+      {!loading && machineGroups.length > 0 && (
         <section style={resultListStyle}>
-          {filteredItems.map((item) => (
-            <div key={item.key} style={resultCardStyle}>
-              <div style={cardTopStyle}>
-                <span style={machineBadgeStyle}>機台 {item.machine_no}</span>
-                <span style={boxMetaStyle}>箱入 {formatQty(item.units_per_box)}</span>
-              </div>
-
-              <div style={productBlockStyle}>
-                <strong style={skuStyle}>{item.product_sku}</strong>
-                <span style={nameStyle}>{item.product_name}</span>
-              </div>
-
-              <div style={readOnlyGridStyle}>
-                <div style={readOnlyCellStyle}>
-                  <span>台內數量</span>
-                  <strong>{formatQty(item.audit_inner_qty)}</strong>
+          {machineGroups.map((group) => (
+            <div key={group.machineNo} style={machineCardStyle}>
+              <div style={machineCardHeaderStyle}>
+                <div>
+                  <strong style={machineCardTitleStyle}>
+                    機台 {group.machineNo}
+                  </strong>
+                  <div style={machineCardMetaStyle}>{group.items.length} 項商品</div>
                 </div>
-                <div style={readOnlyCellStyle}>
-                  <span>台頂箱數</span>
-                  <strong>{formatQty(item.outside_box)}</strong>
-                </div>
-                <div style={readOnlyCellStyle}>
-                  <span>台頂散數</span>
-                  <strong>{formatQty(item.outside_piece)}</strong>
+                <div style={machineCardTotalStyle}>
+                  <span>台內 {formatQty(group.innerQty)}</span>
+                  <span>台頂 {formatQty(group.groundQty)}</span>
                 </div>
               </div>
 
-              <div style={editGridStyle}>
-                <label style={miniFieldStyle}>
-                  <span>盤點台內</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    value={item.corrected_inner_qty}
-                    onChange={(event) =>
-                      updateItemQty(
-                        item.key,
-                        "corrected_inner_qty",
-                        event.target.value
-                      )
-                    }
-                    style={miniInputStyle}
-                  />
-                </label>
+              <div style={machineItemListStyle}>
+                {group.items.map((item) => (
+                  <div key={item.key} style={machineItemStyle}>
+                    <div style={itemInfoStyle}>
+                      <div style={itemTitleLineStyle}>
+                        <strong style={skuStyle}>{item.product_sku}</strong>
+                        <span style={boxMetaStyle}>
+                          箱入 {formatQty(item.units_per_box)}
+                        </span>
+                      </div>
+                      <div style={nameStyle}>{item.product_name}</div>
+                      <div style={readOnlyLineStyle}>
+                        台內 {formatQty(item.audit_inner_qty)} / 台頂{" "}
+                        {formatQty(item.outside_box)}箱{" "}
+                        {formatQty(item.outside_piece)}散
+                      </div>
+                    </div>
 
-                <label style={miniFieldStyle}>
-                  <span>台頂箱</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    value={item.corrected_ground_box}
-                    onChange={(event) =>
-                      updateItemQty(
-                        item.key,
-                        "corrected_ground_box",
-                        event.target.value
-                      )
-                    }
-                    style={miniInputStyle}
-                  />
-                </label>
+                    <div style={editGridStyle}>
+                      <label style={miniFieldStyle}>
+                        <span>台內</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={item.corrected_inner_qty}
+                          onChange={(event) =>
+                            updateItemQty(
+                              item.key,
+                              "corrected_inner_qty",
+                              event.target.value
+                            )
+                          }
+                          style={miniInputStyle}
+                        />
+                      </label>
 
-                <label style={miniFieldStyle}>
-                  <span>台頂散</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    value={item.corrected_ground_piece}
-                    onChange={(event) =>
-                      updateItemQty(
-                        item.key,
-                        "corrected_ground_piece",
-                        event.target.value
-                      )
-                    }
-                    style={miniInputStyle}
-                  />
-                </label>
+                      <label style={miniFieldStyle}>
+                        <span>台頂箱</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={item.corrected_ground_box}
+                          onChange={(event) =>
+                            updateItemQty(
+                              item.key,
+                              "corrected_ground_box",
+                              event.target.value
+                            )
+                          }
+                          style={miniInputStyle}
+                        />
+                      </label>
+
+                      <label style={miniFieldStyle}>
+                        <span>台頂散</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={item.corrected_ground_piece}
+                          onChange={(event) =>
+                            updateItemQty(
+                              item.key,
+                              "corrected_ground_piece",
+                              event.target.value
+                            )
+                          }
+                          style={miniInputStyle}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
         </section>
       )}
 
-      {filteredItems.length > 0 && (
+      {items.length > 0 && (
         <div style={bottomBarStyle}>
+          <button
+            onClick={closeAuditSnapshot}
+            disabled={closingAudit || loading || saving}
+            style={{
+              ...bottomSecondaryButtonStyle,
+              opacity: closingAudit || loading || saving ? 0.7 : 1,
+            }}
+          >
+            {closingAudit ? "鎖定中" : "鎖定"}
+          </button>
+
           <button
             onClick={submitClose}
             disabled={saving || loading}
@@ -667,37 +631,9 @@ const panelStyle: CSSProperties = {
   background: "#101827",
   border: "1px solid #273244",
   borderRadius: 18,
-  padding: 14,
+  padding: 12,
   display: "grid",
-  gap: 9,
   boxSizing: "border-box",
-}
-
-const rebuildInfoStyle: CSSProperties = {
-  border: "1px solid rgba(96, 165, 250, 0.2)",
-  borderRadius: 14,
-  background: "rgba(96, 165, 250, 0.08)",
-  padding: "10px 12px",
-  display: "grid",
-  gap: 7,
-  marginTop: 3,
-  color: "#cbd5e1",
-  fontSize: 13,
-  fontWeight: 800,
-  lineHeight: 1.35,
-}
-
-const secondaryButtonStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 46,
-  border: "1px solid rgba(96, 165, 250, 0.35)",
-  borderRadius: 14,
-  background: "rgba(96, 165, 250, 0.12)",
-  color: "#bfdbfe",
-  fontSize: 15,
-  fontWeight: 900,
-  cursor: "pointer",
-  marginTop: 4,
 }
 
 const inputStyle: CSSProperties = {
@@ -711,17 +647,6 @@ const inputStyle: CSSProperties = {
   padding: "0 13px",
   boxSizing: "border-box",
   outline: "none",
-}
-
-const selectStyle: CSSProperties = {
-  ...inputStyle,
-  appearance: "none",
-}
-
-const controlGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr",
-  gap: 10,
 }
 
 const fieldStyle: CSSProperties = {
@@ -785,7 +710,7 @@ const resultListStyle: CSSProperties = {
   marginTop: 12,
 }
 
-const resultCardStyle: CSSProperties = {
+const machineCardStyle: CSSProperties = {
   width: "100%",
   border: "1px solid #273244",
   borderRadius: 14,
@@ -797,18 +722,35 @@ const resultCardStyle: CSSProperties = {
   boxSizing: "border-box",
 }
 
-const cardTopStyle: CSSProperties = {
+const machineCardHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   gap: 10,
 }
 
-const machineBadgeStyle: CSSProperties = {
+const machineCardTitleStyle: CSSProperties = {
   color: "#f7c873",
-  fontSize: 12,
+  fontSize: 17,
   fontWeight: 900,
   lineHeight: 1.2,
+}
+
+const machineCardMetaStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 12,
+  fontWeight: 800,
+  marginTop: 3,
+}
+
+const machineCardTotalStyle: CSSProperties = {
+  display: "grid",
+  gap: 3,
+  color: "#bfdbfe",
+  fontSize: 12,
+  fontWeight: 850,
+  textAlign: "right",
+  whiteSpace: "nowrap",
 }
 
 const boxMetaStyle: CSSProperties = {
@@ -818,9 +760,28 @@ const boxMetaStyle: CSSProperties = {
   whiteSpace: "nowrap",
 }
 
-const productBlockStyle: CSSProperties = {
+const machineItemListStyle: CSSProperties = {
+  display: "grid",
+  gap: 9,
+}
+
+const machineItemStyle: CSSProperties = {
+  borderTop: "1px solid #273244",
+  paddingTop: 9,
+  display: "grid",
+  gap: 8,
+}
+
+const itemInfoStyle: CSSProperties = {
   display: "grid",
   gap: 4,
+}
+
+const itemTitleLineStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
   minWidth: 0,
 }
 
@@ -838,23 +799,11 @@ const nameStyle: CSSProperties = {
   lineHeight: 1.3,
 }
 
-const readOnlyGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr",
-  gap: 7,
-}
-
-const readOnlyCellStyle: CSSProperties = {
-  border: "1px solid #273244",
-  borderRadius: 10,
-  background: "#0b1220",
-  padding: "7px 8px",
-  display: "grid",
-  gap: 3,
+const readOnlyLineStyle: CSSProperties = {
   color: "#94a3b8",
-  fontSize: 11,
+  fontSize: 12,
   fontWeight: 800,
-  minWidth: 0,
+  lineHeight: 1.3,
 }
 
 const editGridStyle: CSSProperties = {
@@ -895,6 +844,21 @@ const bottomBarStyle: CSSProperties = {
   padding: "12px 16px max(12px, env(safe-area-inset-bottom))",
   background: "linear-gradient(180deg, rgba(5,9,19,0), #050913 24%)",
   boxSizing: "border-box",
+  display: "grid",
+  gridTemplateColumns: "88px minmax(0, 1fr)",
+  gap: 10,
+}
+
+const bottomSecondaryButtonStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 54,
+  border: "1px solid rgba(96, 165, 250, 0.35)",
+  borderRadius: 18,
+  background: "rgba(96, 165, 250, 0.12)",
+  color: "#bfdbfe",
+  fontSize: 15,
+  fontWeight: 900,
+  cursor: "pointer",
 }
 
 const submitButtonStyle: CSSProperties = {
