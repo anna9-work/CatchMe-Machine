@@ -30,7 +30,8 @@ type CloseItem = {
   outside_box: number
   outside_piece: number
   corrected_inner_qty: string
-  corrected_ground_qty: string
+  corrected_ground_box: string
+  corrected_ground_piece: string
 }
 
 export default function MachineAuditClosePage({ onBack }: Props) {
@@ -74,10 +75,10 @@ export default function MachineAuditClosePage({ onBack }: Props) {
     return filteredItems.reduce(
       (acc, item) => {
         acc.innerQty += readInputQty(item.corrected_inner_qty)
-        acc.groundQty += readInputQty(item.corrected_ground_qty)
+        acc.groundQty += calcCorrectedGroundQty(item)
         acc.totalQty +=
           readInputQty(item.corrected_inner_qty) +
-          readInputQty(item.corrected_ground_qty)
+          calcCorrectedGroundQty(item)
         return acc
       },
       {
@@ -123,7 +124,8 @@ export default function MachineAuditClosePage({ onBack }: Props) {
           outside_box: outsideBox,
           outside_piece: outsidePiece,
           corrected_inner_qty: String(insidePiece),
-          corrected_ground_qty: String(groundQty),
+          corrected_ground_box: String(outsideBox),
+          corrected_ground_piece: String(outsidePiece),
         }
       })
 
@@ -176,7 +178,10 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
   function updateItemQty(
     key: string,
-    field: "corrected_inner_qty" | "corrected_ground_qty",
+    field:
+      | "corrected_inner_qty"
+      | "corrected_ground_box"
+      | "corrected_ground_piece",
     value: string
   ) {
     setItems((current) =>
@@ -195,7 +200,8 @@ export default function MachineAuditClosePage({ onBack }: Props) {
     const targetItems = items.filter((item) => {
       return (
         Number.isFinite(readInputQty(item.corrected_inner_qty)) &&
-        Number.isFinite(readInputQty(item.corrected_ground_qty))
+        Number.isFinite(readInputQty(item.corrected_ground_box)) &&
+        Number.isFinite(readInputQty(item.corrected_ground_piece))
       )
     })
 
@@ -206,15 +212,21 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
     for (const item of targetItems) {
       const innerQty = Number(item.corrected_inner_qty)
-      const groundQty = Number(item.corrected_ground_qty)
+      const groundBox = Number(item.corrected_ground_box)
+      const groundPiece = Number(item.corrected_ground_piece)
 
       if (!Number.isInteger(innerQty) || innerQty < 0) {
         setError(`${item.machine_no} ${item.product_sku} 台內數量不是 0 以上整數`)
         return
       }
 
-      if (!Number.isInteger(groundQty) || groundQty < 0) {
-        setError(`${item.machine_no} ${item.product_sku} 台頂數量不是 0 以上整數`)
+      if (!Number.isInteger(groundBox) || groundBox < 0) {
+        setError(`${item.machine_no} ${item.product_sku} 台頂箱數不是 0 以上整數`)
+        return
+      }
+
+      if (!Number.isInteger(groundPiece) || groundPiece < 0) {
+        setError(`${item.machine_no} ${item.product_sku} 台頂散數不是 0 以上整數`)
         return
       }
     }
@@ -239,7 +251,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
             p_machine_no: item.machine_no,
             p_sku: item.product_sku,
             p_corrected_inner_qty: Number(item.corrected_inner_qty),
-            p_corrected_ground_qty: Number(item.corrected_ground_qty),
+            p_corrected_ground_qty: calcCorrectedGroundQty(item),
             p_note: "機台盤點結算",
             p_created_by: "webapp_audit_close",
           }
@@ -298,29 +310,53 @@ export default function MachineAuditClosePage({ onBack }: Props) {
       {error && <div style={errorStyle}>{error}</div>}
 
       <section style={panelStyle}>
-        <label style={labelStyle}>結算日期（該日結束後）</label>
-        <input
-          type="date"
-          value={bizDate}
-          onChange={(event) => setBizDate(event.target.value)}
-          style={inputStyle}
-        />
+        <div style={controlGridStyle}>
+          <label style={fieldStyle}>
+            <span>結算日期</span>
+            <input
+              type="date"
+              value={bizDate}
+              onChange={(event) => setBizDate(event.target.value)}
+              style={inputStyle}
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span>機台</span>
+            <select
+              value={selectedMachineNo}
+              onChange={(event) => setSelectedMachineNo(event.target.value)}
+              style={selectStyle}
+              disabled={loading || machineNos.length === 0}
+            >
+              <option value="">全部機台</option>
+              {machineNos.map((machineNo) => (
+                <option key={machineNo} value={machineNo}>
+                  {machineNo}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={fieldStyle}>
+            <span>搜尋</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="機台 / SKU / 品名"
+              style={inputStyle}
+            />
+          </label>
+        </div>
 
         <div style={rebuildInfoStyle}>
-          <div style={rebuildInfoRowStyle}>
-            <span>寫入</span>
-            <strong>{bizDate} 結束台內＋台頂</strong>
-          </div>
-          <div style={rebuildInfoRowStyle}>
-            <span>更新</span>
-            <strong>
-              生命週期 {bizDate} ～ {affectedStartDate}
-            </strong>
-          </div>
-          <div style={rebuildInfoRowStyle}>
-            <span>影響</span>
-            <strong>該日差異與隔日起始數量</strong>
-          </div>
+          <span>
+            寫入 <strong>{bizDate}</strong> 結束台內 / 台頂
+          </span>
+          <span>
+            更新生命週期 <strong>{bizDate}</strong> ～{" "}
+            <strong>{affectedStartDate}</strong>
+          </span>
         </div>
 
         <button
@@ -333,29 +369,6 @@ export default function MachineAuditClosePage({ onBack }: Props) {
         >
           {closingAudit ? "鎖定中..." : "鎖定盤點資料"}
         </button>
-
-        <label style={labelStyle}>機台</label>
-        <select
-          value={selectedMachineNo}
-          onChange={(event) => setSelectedMachineNo(event.target.value)}
-          style={selectStyle}
-          disabled={loading || machineNos.length === 0}
-        >
-          <option value="">全部機台</option>
-          {machineNos.map((machineNo) => (
-            <option key={machineNo} value={machineNo}>
-              {machineNo}
-            </option>
-          ))}
-        </select>
-
-        <label style={labelStyle}>搜尋</label>
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="機台 / SKU / 品名"
-          style={inputStyle}
-        />
       </section>
 
       {!loading && (
@@ -394,26 +407,34 @@ export default function MachineAuditClosePage({ onBack }: Props) {
         <section style={resultListStyle}>
           {filteredItems.map((item) => (
             <div key={item.key} style={resultCardStyle}>
-              <div style={resultHeaderStyle}>
-                <div style={resultMainStyle}>
-                  <span style={machineNoStyle}>機台 {item.machine_no}</span>
-                  <strong style={skuStyle}>{item.product_sku}</strong>
-                  <span style={nameStyle}>{item.product_name}</span>
+              <div style={cardTopStyle}>
+                <span style={machineBadgeStyle}>機台 {item.machine_no}</span>
+                <span style={boxMetaStyle}>箱入 {formatQty(item.units_per_box)}</span>
+              </div>
+
+              <div style={productBlockStyle}>
+                <strong style={skuStyle}>{item.product_sku}</strong>
+                <span style={nameStyle}>{item.product_name}</span>
+              </div>
+
+              <div style={readOnlyGridStyle}>
+                <div style={readOnlyCellStyle}>
+                  <span>台內數量</span>
+                  <strong>{formatQty(item.audit_inner_qty)}</strong>
                 </div>
-                <span style={resultMetaStyle}>箱入 {item.units_per_box}</span>
+                <div style={readOnlyCellStyle}>
+                  <span>台頂箱數</span>
+                  <strong>{formatQty(item.outside_box)}</strong>
+                </div>
+                <div style={readOnlyCellStyle}>
+                  <span>台頂散數</span>
+                  <strong>{formatQty(item.outside_piece)}</strong>
+                </div>
               </div>
 
-              <div style={auditMetaStyle}>
-                <span>原盤台內 {formatQty(item.audit_inner_qty)}</span>
-                <span>
-                  原盤台頂 {formatQty(item.audit_ground_qty)}（{item.outside_box}箱
-                  {item.outside_piece}散）
-                </span>
-              </div>
-
-              <div style={qtyGridStyle}>
+              <div style={editGridStyle}>
                 <label style={miniFieldStyle}>
-                  <span>結算台內</span>
+                  <span>盤點台內</span>
                   <input
                     type="number"
                     inputMode="numeric"
@@ -431,16 +452,34 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                 </label>
 
                 <label style={miniFieldStyle}>
-                  <span>結算台頂</span>
+                  <span>台頂箱</span>
                   <input
                     type="number"
                     inputMode="numeric"
                     min={0}
-                    value={item.corrected_ground_qty}
+                    value={item.corrected_ground_box}
                     onChange={(event) =>
                       updateItemQty(
                         item.key,
-                        "corrected_ground_qty",
+                        "corrected_ground_box",
+                        event.target.value
+                      )
+                    }
+                    style={miniInputStyle}
+                  />
+                </label>
+
+                <label style={miniFieldStyle}>
+                  <span>台頂散</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={item.corrected_ground_piece}
+                    onChange={(event) =>
+                      updateItemQty(
+                        item.key,
+                        "corrected_ground_piece",
                         event.target.value
                       )
                     }
@@ -474,6 +513,13 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 function readInputQty(value: string) {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
+}
+
+function calcCorrectedGroundQty(item: CloseItem) {
+  return (
+    readInputQty(item.corrected_ground_box) * item.units_per_box +
+    readInputQty(item.corrected_ground_piece)
+  )
 }
 
 function formatQty(value: number) {
@@ -635,17 +681,10 @@ const rebuildInfoStyle: CSSProperties = {
   display: "grid",
   gap: 7,
   marginTop: 3,
-}
-
-const rebuildInfoRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "48px minmax(0, 1fr)",
-  gap: 10,
-  alignItems: "center",
   color: "#cbd5e1",
   fontSize: 13,
-  lineHeight: 1.25,
-  fontWeight: 760,
+  fontWeight: 800,
+  lineHeight: 1.35,
 }
 
 const secondaryButtonStyle: CSSProperties = {
@@ -659,13 +698,6 @@ const secondaryButtonStyle: CSSProperties = {
   fontWeight: 900,
   cursor: "pointer",
   marginTop: 4,
-}
-
-const labelStyle: CSSProperties = {
-  color: "#cbd5e1",
-  fontSize: 13,
-  fontWeight: 850,
-  marginTop: 5,
 }
 
 const inputStyle: CSSProperties = {
@@ -684,6 +716,20 @@ const inputStyle: CSSProperties = {
 const selectStyle: CSSProperties = {
   ...inputStyle,
   appearance: "none",
+}
+
+const controlGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr",
+  gap: 10,
+}
+
+const fieldStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  color: "#cbd5e1",
+  fontSize: 13,
+  fontWeight: 850,
 }
 
 const machineSummaryStyle: CSSProperties = {
@@ -735,40 +781,47 @@ const summaryStatStyle: CSSProperties = {
 
 const resultListStyle: CSSProperties = {
   display: "grid",
-  gap: 10,
+  gap: 9,
   marginTop: 12,
 }
 
 const resultCardStyle: CSSProperties = {
   width: "100%",
   border: "1px solid #273244",
-  borderRadius: 16,
+  borderRadius: 14,
   background: "#0f172a",
   color: "#fff",
-  padding: "13px 14px",
+  padding: 12,
   display: "grid",
-  gap: 10,
+  gap: 8,
   boxSizing: "border-box",
 }
 
-const resultHeaderStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  gap: 12,
-  alignItems: "start",
+const cardTopStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
 }
 
-const resultMainStyle: CSSProperties = {
-  display: "grid",
-  gap: 5,
-  minWidth: 0,
-}
-
-const machineNoStyle: CSSProperties = {
+const machineBadgeStyle: CSSProperties = {
   color: "#f7c873",
   fontSize: 12,
   fontWeight: 900,
   lineHeight: 1.2,
+}
+
+const boxMetaStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 12,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+}
+
+const productBlockStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
 }
 
 const skuStyle: CSSProperties = {
@@ -780,54 +833,55 @@ const skuStyle: CSSProperties = {
 
 const nameStyle: CSSProperties = {
   color: "#f8fafc",
-  fontSize: 15,
+  fontSize: 14,
   fontWeight: 760,
   lineHeight: 1.3,
 }
 
-const resultMetaStyle: CSSProperties = {
-  color: "#94a3b8",
-  fontSize: 12,
-  fontWeight: 800,
-  whiteSpace: "nowrap",
+const readOnlyGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr 1fr",
+  gap: 7,
 }
 
-const auditMetaStyle: CSSProperties = {
+const readOnlyCellStyle: CSSProperties = {
   border: "1px solid #273244",
-  borderRadius: 13,
+  borderRadius: 10,
   background: "#0b1220",
-  color: "#94a3b8",
-  padding: "9px 10px",
+  padding: "7px 8px",
   display: "grid",
-  gap: 4,
-  fontSize: 12,
+  gap: 3,
+  color: "#94a3b8",
+  fontSize: 11,
   fontWeight: 800,
+  minWidth: 0,
 }
 
-const qtyGridStyle: CSSProperties = {
+const editGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 10,
+  gridTemplateColumns: "1fr 1fr 1fr",
+  gap: 7,
+  justifyContent: "end",
 }
 
 const miniFieldStyle: CSSProperties = {
   display: "grid",
-  gap: 6,
+  gap: 5,
   color: "#cbd5e1",
-  fontSize: 12,
+  fontSize: 11,
   fontWeight: 850,
 }
 
 const miniInputStyle: CSSProperties = {
   width: "100%",
-  minHeight: 42,
-  borderRadius: 13,
+  minHeight: 38,
+  borderRadius: 11,
   border: "1px solid #334155",
   background: "#0b1220",
   color: "#fff",
-  fontSize: 17,
+  fontSize: 16,
   fontWeight: 850,
-  padding: "0 11px",
+  padding: "0 9px",
   boxSizing: "border-box",
   outline: "none",
 }
