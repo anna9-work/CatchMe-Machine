@@ -13,6 +13,7 @@ import ProductManage from "./pages/ProductManage"
 import InboundPage from "./pages/InboundPage"
 import AdjustmentPage from "./pages/AdjustmentPage"
 import LineBotPage from "./pages/LineBotPage"
+import SpecialCorrectionPage from "./pages/SpecialCorrectionPage"
 import InventoryAuditPage from "./pages/InventoryAuditPage"
 import { supabase } from "./lib/supabase"
 
@@ -29,6 +30,7 @@ type Page =
   | "inbound"
   | "adjustment"
   | "lineBot"
+  | "specialCorrection"
   | "inventoryAudit"
 
 const GROUP_CODE = "catch_0001"
@@ -37,6 +39,7 @@ function App() {
   const [page, setPage] = useState<Page>("home")
   const [auditId, setAuditId] = useState<number | null>(null)
   const [selectedMachineNo, setSelectedMachineNo] = useState("")
+  const [selectedLedgerId, setSelectedLedgerId] = useState<number | null>(null)
   const [loadingAudit, setLoadingAudit] = useState(false)
   const [error, setError] = useState("")
 
@@ -141,7 +144,24 @@ function App() {
   }
 
   if (page === "lineBot") {
-    return <LineBotPage onBack={() => setPage("home")} />
+    return (
+      <LineBotPage
+        onBack={() => setPage("home")}
+        onOpenCorrection={(ledgerId) => {
+          setSelectedLedgerId(ledgerId)
+          setPage("specialCorrection")
+        }}
+      />
+    )
+  }
+
+  if (page === "specialCorrection") {
+    return (
+      <SpecialCorrectionPage
+        ledgerId={selectedLedgerId}
+        onBack={() => setPage("lineBot")}
+      />
+    )
   }
 
   if (page === "inventoryAudit") {
