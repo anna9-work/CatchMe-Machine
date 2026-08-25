@@ -38,6 +38,7 @@ type MovementProbe = {
 
 type ProductMap = Record<string, ProductInfo>
 type FollowingMap = Record<number, boolean>
+type CorrectionMode = "quantity" | "cost"
 
 const GROUP_CODE = "catch_0001"
 const RECORD_SOURCES = [
@@ -78,6 +79,8 @@ export default function LineBotPage({ onBack }: Props) {
   )
   const [correctionReason, setCorrectionReason] = useState(CORRECTION_REASON_OPTIONS[0])
   const [correctionNote, setCorrectionNote] = useState("")
+  const [correctionMode, setCorrectionMode] = useState<CorrectionMode>("quantity")
+  const [costCorrectionValue, setCostCorrectionValue] = useState("")
   const [correcting, setCorrecting] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -241,6 +244,12 @@ export default function LineBotPage({ onBack }: Props) {
             : "其他"
     )
     setCorrectionNote("")
+    setCorrectionMode("quantity")
+    setCostCorrectionValue(
+      row.unit_cost_piece === null || row.unit_cost_piece === undefined
+        ? ""
+        : String(row.unit_cost_piece)
+    )
     setMessage("")
     setError("")
   }
@@ -248,6 +257,8 @@ export default function LineBotPage({ onBack }: Props) {
   function closeCorrection() {
     setSelectedCorrectionRow(null)
     setCorrectionNote("")
+    setCorrectionMode("quantity")
+    setCostCorrectionValue("")
     setError("")
   }
 
@@ -334,6 +345,78 @@ export default function LineBotPage({ onBack }: Props) {
     }
   }
 
+  async function submitCostCorrection() {
+    if (!selectedCorrectionRow) return
+
+    const nextCost = Number(costCorrectionValue)
+    if (!Number.isFinite(nextCost) || nextCost <= 0) {
+      setError("請輸入正確的單件成本")
+      return
+    }
+
+    const product = products[selectedCorrectionRow.product_sku]
+    const originalCost = Number(selectedCorrectionRow.unit_cost_piece ?? 0)
+    const quantityPiece = getQuantityPiece(selectedCorrectionRow, product)
+    const nextAmount = quantityPiece * nextCost
+    const ledgerBizDate = getLedgerBusinessDate(selectedCorrectionRow.created_at)
+
+    const ok = window.confirm(
+      `確定校正 #${selectedCorrectionRow.id} 的成本？\n單件成本：${formatMoney(
+        originalCost
+      )} → ${formatMoney(nextCost)}\n重新計算金額：${formatMoney(
+        nextAmount
+      )}\n系統會從 ${ledgerBizDate} 重新關帳並通知試算表。`
+    )
+    if (!ok) return
+
+    try {
+      setCorrecting(true)
+      setError("")
+      setMessage("")
+
+      const { error: correctionError } = await supabase.rpc("rpc_correct_ledger_cost_v1", {
+        p_group: GROUP_CODE,
+        p_ledger_id: selectedCorrectionRow.id,
+        p_unit_cost_piece: nextCost,
+        p_actor: "app_transaction_page",
+      })
+
+      if (correctionError) throw correctionError
+
+      const { error: closingError } = await supabase.rpc("rebuild_closings_range_from", {
+        p_group: GROUP_CODE,
+        p_start_biz_date: ledgerBizDate,
+      })
+
+      if (closingError) {
+        throw new Error(`成本已校正，但重建關帳失敗：${closingError.message}`)
+      }
+
+      const { error: gasError } = await supabase.rpc("push_gas_rebuild_range", {
+        p_group: GROUP_CODE,
+        p_start_date: ledgerBizDate,
+        p_end_date: getBusinessDateText(),
+        p_reason: "cost_correction",
+      })
+
+      if (gasError) {
+        throw new Error(`成本已校正且關帳已重建，但通知試算表失敗：${gasError.message}`)
+      }
+
+      setMessage(`已校正 #${selectedCorrectionRow.id} 的成本`)
+      setSelectedCorrectionRow(null)
+      setCorrectionNote("")
+      setCorrectionMode("quantity")
+      setCostCorrectionValue("")
+      await loadRecords()
+    } catch (err) {
+      console.error(err)
+      setError(formatCostCorrectionError(err))
+    } finally {
+      setCorrecting(false)
+    }
+  }
+
   return (
     <div style={pageStyle}>
       <div style={contentStyle}>
@@ -371,10 +454,15 @@ export default function LineBotPage({ onBack }: Props) {
             product={products[selectedCorrectionRow.product_sku]}
             reason={correctionReason}
             note={correctionNote}
+            mode={correctionMode}
+            costValue={costCorrectionValue}
             correcting={correcting}
             onReasonChange={setCorrectionReason}
             onNoteChange={setCorrectionNote}
+            onModeChange={setCorrectionMode}
+            onCostChange={setCostCorrectionValue}
             onSubmit={submitManualAdjustment}
+            onCostSubmit={submitCostCorrection}
           />
         ) : (
           <>
@@ -484,10 +572,15 @@ type CorrectionPanelProps = {
   product?: ProductInfo
   reason: string
   note: string
+  mode: CorrectionMode
+  costValue: string
   correcting: boolean
   onReasonChange: (value: string) => void
   onNoteChange: (value: string) => void
+  onModeChange: (value: CorrectionMode) => void
+  onCostChange: (value: string) => void
   onSubmit: () => void
+  onCostSubmit: () => void
 }
 
 function CorrectionPanel({
@@ -495,17 +588,44 @@ function CorrectionPanel({
   product,
   reason,
   note,
+  mode,
+  costValue,
   correcting,
   onReasonChange,
   onNoteChange,
+  onModeChange,
+  onCostChange,
   onSubmit,
+  onCostSubmit,
 }: CorrectionPanelProps) {
   const proposal = getCorrectionProposal(row)
+  const quantityPiece = getQuantityPiece(row, product)
+  const originalAmount = getDisplayAmount(row, product)
+  const nextCost = Number(costValue)
+  const previewAmount =
+    Number.isFinite(nextCost) && nextCost > 0 ? quantityPiece * nextCost : null
 
   return (
     <section style={correctionPanelStyle}>
       <div style={correctionNoticeStyle}>
-        特殊校正會新增一筆 manual_adjustment，並從原交易業務日重建日結。
+        數量校正會新增 manual_adjustment；成本校正會更新原交易成本，並從原交易業務日重建日結。
+      </div>
+
+      <div style={modeSwitchStyle}>
+        <button
+          type="button"
+          onClick={() => onModeChange("quantity")}
+          style={mode === "quantity" ? modeButtonActiveStyle : modeButtonStyle}
+        >
+          數量校正
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange("cost")}
+          style={mode === "cost" ? modeButtonActiveStyle : modeButtonStyle}
+        >
+          成本校正
+        </button>
       </div>
 
       <div style={detailGridStyle}>
@@ -527,38 +647,78 @@ function CorrectionPanel({
         />
       </div>
 
-      <label style={labelStyle}>原因</label>
-      <select
-        value={reason}
-        onChange={(event) => onReasonChange(event.target.value)}
-        style={inputStyle}
-      >
-        {CORRECTION_REASON_OPTIONS.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+      {mode === "quantity" ? (
+        <>
+          <label style={labelStyle}>原因</label>
+          <select
+            value={reason}
+            onChange={(event) => onReasonChange(event.target.value)}
+            style={inputStyle}
+          >
+            {CORRECTION_REASON_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
 
-      <label style={labelStyle}>備註（必填）</label>
-      <textarea
-        value={note}
-        onChange={(event) => onNoteChange(event.target.value)}
-        placeholder="請輸入校正原因，例如：tx_void 重複計算造成庫存錯誤"
-        style={textareaStyle}
-      />
+          <label style={labelStyle}>備註（必填）</label>
+          <textarea
+            value={note}
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder="請輸入校正原因，例如：tx_void 重複計算造成庫存錯誤"
+            style={textareaStyle}
+          />
 
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={correcting}
-        style={{
-          ...submitCorrectionButtonStyle,
-          opacity: correcting ? 0.65 : 1,
-        }}
-      >
-        {correcting ? "送出中..." : "送出特殊校正"}
-      </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={correcting}
+            style={{
+              ...submitCorrectionButtonStyle,
+              opacity: correcting ? 0.65 : 1,
+            }}
+          >
+            {correcting ? "送出中..." : "送出數量校正"}
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={costPreviewStyle}>
+            <InfoItem label="原單件成本" value={formatMoney(row.unit_cost_piece)} />
+            <InfoItem label="原金額" value={formatMoney(originalAmount)} />
+            <InfoItem label="計算數量" value={`${formatQty(quantityPiece)} 件`} />
+            <InfoItem
+              label="新金額"
+              value={previewAmount === null ? "請輸入成本" : formatMoney(previewAmount)}
+            />
+          </div>
+
+          <label style={labelStyle}>新單件成本</label>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={costValue}
+            onChange={(event) => onCostChange(event.target.value)}
+            placeholder="請輸入正確單件成本"
+            style={inputStyle}
+          />
+
+          <button
+            type="button"
+            onClick={onCostSubmit}
+            disabled={correcting}
+            style={{
+              ...submitCorrectionButtonStyle,
+              opacity: correcting ? 0.65 : 1,
+            }}
+          >
+            {correcting ? "送出中..." : "送出成本校正"}
+          </button>
+        </>
+      )}
     </section>
   )
 }
@@ -611,6 +771,15 @@ function getDisplayAmount(row: LedgerRow, product?: ProductInfo) {
   const unitCost = Number(row.unit_cost_piece ?? 0)
 
   return ((boxQty * unitsPerBox) + pieceQty) * unitCost
+}
+
+function getQuantityPiece(row: LedgerRow, product?: ProductInfo) {
+  const direction = getDirection(row)
+  const unitsPerBox = Number(product?.units_per_box ?? 1) || 1
+  const boxQty = direction === "in" ? Number(row.in_box ?? 0) : Number(row.out_box ?? 0)
+  const pieceQty = direction === "in" ? Number(row.in_piece ?? 0) : Number(row.out_piece ?? 0)
+
+  return boxQty * unitsPerBox + pieceQty
 }
 
 function getDisabledReason(label: string) {
@@ -760,6 +929,19 @@ function formatAdjustmentError(err: unknown) {
   if (message.includes("ERR_NOTE_REQUIRED")) return "特殊校正必須填寫備註"
   if (message.includes("INSUFFICIENT_BOX")) return "庫存箱數不足，不能建立校正出庫"
   if (message.includes("INSUFFICIENT_PIECE")) return "庫存散數不足，不能建立校正出庫"
+
+  return message
+}
+
+function formatCostCorrectionError(err: unknown) {
+  const message = err instanceof Error ? err.message : "成本校正失敗"
+
+  if (message.includes("ERR_BAD_COST")) return "請輸入正確的單件成本"
+  if (message.includes("ERR_LEDGER_NOT_FOUND")) return "找不到這筆交易"
+  if (message.includes("ERR_LEDGER_VOIDED")) return "已作廢的交易不能校正成本"
+  if (message.includes("ERR_TX_VOID_NOT_ALLOWED")) return "tx_void 回沖紀錄不能直接校正成本"
+  if (message.includes("ERR_SOURCE_NOT_ALLOWED")) return "這筆來源不允許做成本校正"
+  if (message.includes("ERR_ZERO_QTY")) return "這筆交易數量為 0，不能校正成本"
 
   return message
 }
@@ -1012,6 +1194,29 @@ const correctionNoticeStyle: CSSProperties = {
   lineHeight: 1.5,
 }
 
+const modeSwitchStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+}
+
+const modeButtonStyle: CSSProperties = {
+  height: 38,
+  borderRadius: 11,
+  border: "1px solid #333",
+  background: "#111",
+  color: "#aaa",
+  fontSize: 13,
+  fontWeight: 900,
+}
+
+const modeButtonActiveStyle: CSSProperties = {
+  ...modeButtonStyle,
+  border: "1px solid rgba(90,162,255,0.5)",
+  background: "rgba(90,162,255,0.16)",
+  color: "#bfdbfe",
+}
+
 const detailGridStyle: CSSProperties = {
   display: "grid",
   gap: 8,
@@ -1062,6 +1267,12 @@ const submitCorrectionButtonStyle: CSSProperties = {
   color: "#fff",
   fontSize: 15,
   fontWeight: 950,
+}
+
+const costPreviewStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
 }
 
 const emptyStyle: CSSProperties = {
