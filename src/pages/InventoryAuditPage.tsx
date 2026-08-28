@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { supabase } from "../lib/supabase"
 
 const GROUP_CODE = "catch_0001"
-const ALLOWED_WAREHOUSES = ["main", "withdraw", "swap"]
+const DEFAULT_WAREHOUSE_ORDER = ["main", "withdraw", "swap", "onsite"]
+const AUDIT_REVIEW_LIMIT_DAYS = 30
 
 type Props = {
   onBack: () => void
@@ -14,6 +15,7 @@ type AuditStatus = "draft" | "submitted" | "approved"
 type Warehouse = {
   warehouse_code: string
   warehouse_name: string
+  enabled?: boolean
 }
 
 type AuditRecord = {
@@ -85,6 +87,7 @@ type ReviewRow = AuditItem & {
 export default function InventoryAuditPage({ onBack }: Props) {
   const [screen, setScreen] = useState<Screen>("menu")
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [allWarehouses, setAllWarehouses] = useState<Warehouse[]>([])
   const [bizDate, setBizDate] = useState(getBusinessDateValue())
   const [warehouse, setWarehouse] = useState("main")
   const [audits, setAudits] = useState<AuditRow[]>([])
@@ -92,7 +95,9 @@ export default function InventoryAuditPage({ onBack }: Props) {
   const [items, setItems] = useState<AuditItem[]>([])
   const [stockMap, setStockMap] = useState<Map<string, StockMapValue>>(new Map())
   const [reviewExecutable, setReviewExecutable] = useState(false)
+  const [auditListManaging, setAuditListManaging] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [categoryOpen, setCategoryOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState("")
   const [searchResults, setSearchResults] = useState<Product[]>([])
@@ -175,6 +180,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
 
   useEffect(() => {
     void loadWarehouses()
+    void loadWarehouseManageRows()
     void loadAudits("all")
   }, [])
 
@@ -200,28 +206,67 @@ export default function InventoryAuditPage({ onBack }: Props) {
   async function loadWarehouses() {
     const { data, error: warehouseError } = await supabase
       .from("warehouse_kinds")
-      .select("warehouse_code,warehouse_name")
-      .in("warehouse_code", ALLOWED_WAREHOUSES)
+      .select("warehouse_code,warehouse_name,enabled")
+      .eq("enabled", true)
       .order("warehouse_code", { ascending: true })
 
     if (warehouseError) {
       console.error(warehouseError)
-      setWarehouses([
-        { warehouse_code: "main", warehouse_name: "總倉" },
-        { warehouse_code: "withdraw", warehouse_name: "撤台" },
-        { warehouse_code: "swap", warehouse_name: "夾換品" },
-      ])
+      setWarehouses([{ warehouse_code: "main", warehouse_name: "總倉", enabled: true }])
       return
     }
 
-    const rows = ((data ?? []) as Warehouse[]).sort((a, b) => {
-      return (
-        ALLOWED_WAREHOUSES.indexOf(a.warehouse_code) -
-        ALLOWED_WAREHOUSES.indexOf(b.warehouse_code)
-      )
-    })
-
+    const rows = ((data ?? []) as Warehouse[]).sort(sortWarehouses)
     setWarehouses(rows)
+
+    if (rows.length > 0 && !rows.some((row) => row.warehouse_code === warehouse)) {
+      setWarehouse(rows[0].warehouse_code)
+    }
+  }
+
+  async function loadWarehouseManageRows() {
+    try {
+      setError("")
+
+      const { data, error: listError } = await supabase.rpc(
+        "rpc_warehouse_kinds_list"
+      )
+
+      if (listError) throw listError
+
+      setAllWarehouses(((data ?? []) as Warehouse[]).sort(sortWarehouses))
+    } catch (err) {
+      console.error(err)
+      setError(getErrorMessage(err, "讀取倉庫別失敗"))
+    }
+  }
+
+  async function toggleWarehouse(row: Warehouse) {
+    try {
+      setSaving(true)
+      setError("")
+      setMessage("")
+
+      const nextEnabled = !row.enabled
+      const { error: updateError } = await supabase.rpc(
+        "rpc_warehouse_kind_set_enabled",
+        {
+          p_warehouse_code: row.warehouse_code,
+          p_enabled: nextEnabled,
+        }
+      )
+
+      if (updateError) throw updateError
+
+      setMessage(`${row.warehouse_name} 已${nextEnabled ? "啟用" : "停用"}`)
+      await loadWarehouseManageRows()
+      await loadWarehouses()
+    } catch (err) {
+      console.error(err)
+      setError(getErrorMessage(err, "更新倉庫別失敗"))
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function loadAudits(kind: "all" | "submitted") {
@@ -301,9 +346,57 @@ export default function InventoryAuditPage({ onBack }: Props) {
     setSearchResults([])
     setMessage("")
     setError("")
-    setReviewExecutable(forceReview && nextAudit.status === "submitted")
+    setReviewExecutable(
+      forceReview &&
+        nextAudit.status === "submitted" &&
+        !isAuditReviewExpired(nextAudit)
+    )
     setScreen(forceReview || nextAudit.status !== "draft" ? "review" : "entry")
     await loadAuditItems(nextAudit)
+  }
+
+  async function deleteAudit(row: AuditRow) {
+    if (row.status === "approved") {
+      setError("已執行的盤點單不能刪除")
+      return
+    }
+
+    const ok = window.confirm(
+      `確定刪除 ${row.biz_date} ${getWarehouseName(
+        row.warehouse_code,
+        warehouses
+      )} 的盤點單？\n這會一起刪除這張盤點單的所有盤點明細。`
+    )
+    if (!ok) return
+
+    try {
+      setSaving(true)
+      setError("")
+      setMessage("")
+
+      const { error: itemError } = await supabase
+        .from("inventory_audit_items")
+        .delete()
+        .eq("audit_id", row.id)
+
+      if (itemError) throw itemError
+
+      const { error: auditError } = await supabase
+        .from("inventory_audits")
+        .delete()
+        .eq("id", row.id)
+        .eq("group_code", GROUP_CODE)
+
+      if (auditError) throw auditError
+
+      setMessage("盤點單已刪除")
+      await loadAudits("all")
+    } catch (err) {
+      console.error(err)
+      setError(getErrorMessage(err, "刪除盤點單失敗"))
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function loadAuditItems(nextAudit = audit) {
@@ -767,6 +860,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
     setItems([])
     setStockMap(new Map())
     setReviewExecutable(false)
+    setAuditListManaging(false)
     void loadAudits("all")
   }
 
@@ -776,6 +870,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
     setItems([])
     setStockMap(new Map())
     setReviewExecutable(false)
+    setAuditListManaging(false)
     void loadAudits("submitted")
   }
 
@@ -793,7 +888,24 @@ export default function InventoryAuditPage({ onBack }: Props) {
           <h1 style={titleStyle}>{getScreenTitle(screen)}</h1>
           <p style={subtitleStyle}>全店盲盤 / 月盤</p>
         </div>
-        {screen === "entry" && editable ? (
+        {screen === "menu" ? (
+          <button
+            onClick={() => {
+              setCategoryOpen(true)
+              void loadWarehouseManageRows()
+            }}
+            style={ghostButtonStyle}
+          >
+            ⚑ 管理
+          </button>
+        ) : screen === "list" ? (
+          <button
+            onClick={() => setAuditListManaging((value) => !value)}
+            style={ghostButtonStyle}
+          >
+            {auditListManaging ? "完成" : "管理"}
+          </button>
+        ) : screen === "entry" && editable ? (
           <button
             onClick={() => setSearchOpen(true)}
             style={ghostButtonStyle}
@@ -857,6 +969,9 @@ export default function InventoryAuditPage({ onBack }: Props) {
           loading={loading}
           emptyText="目前沒有盤點單"
           onOpen={(row) => void openAudit(row)}
+          managing={auditListManaging}
+          saving={saving}
+          onDelete={(row) => void deleteAudit(row)}
         />
       )}
 
@@ -1014,8 +1129,10 @@ export default function InventoryAuditPage({ onBack }: Props) {
           )}
 
           {audit.status === "submitted" && !reviewExecutable && (
-            <div style={messageStyle}>
-              此頁只提供查看明細。請從「待審核盤點單」入口進入後再送出執行。
+            <div style={isAuditReviewExpired(audit) ? warningStyle : messageStyle}>
+              {isAuditReviewExpired(audit)
+                ? `此盤點單已超過 ${AUDIT_REVIEW_LIMIT_DAYS} 日審核期限，只能查看明細，不能送出執行。`
+                : "此頁只提供查看明細。請從「待審核盤點單」入口進入後再送出執行。"}
             </div>
           )}
 
@@ -1103,6 +1220,58 @@ export default function InventoryAuditPage({ onBack }: Props) {
             >
               確認建立盤點單
             </button>
+          </section>
+        </div>
+      )}
+
+      {categoryOpen && (
+        <div
+          style={sheetOverlayStyle}
+          onClick={() => setCategoryOpen(false)}
+        >
+          <section
+            style={searchSheetStyle}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={sheetHeaderStyle}>
+              <h2 style={sheetTitleStyle}>⚑ 倉庫別管理</h2>
+              <button
+                onClick={() => setCategoryOpen(false)}
+                style={closeButtonStyle}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={emptyStyle}>
+              這裡只控制新單是否可選，歷史交易與舊盤點資料不會被刪除。
+            </p>
+
+            {message && <div style={messageStyle}>{message}</div>}
+            {error && <div style={errorStyle}>{error}</div>}
+
+            <section style={categoryListStyle}>
+              {allWarehouses.length === 0 && (
+                <p style={emptyStyle}>目前沒有倉庫別</p>
+              )}
+
+              {allWarehouses.map((row) => (
+                <button
+                  key={row.warehouse_code}
+                  onClick={() => void toggleWarehouse(row)}
+                  disabled={saving}
+                  style={categoryRowStyle}
+                >
+                  <div>
+                    <strong style={categoryNameStyle}>{row.warehouse_name}</strong>
+                    <span style={categoryCodeStyle}>{row.warehouse_code}</span>
+                  </div>
+                  <span style={row.enabled ? enabledPillStyle : disabledPillStyle}>
+                    {row.enabled ? "啟用" : "停用"}
+                  </span>
+                </button>
+              ))}
+            </section>
           </section>
         </div>
       )}
@@ -1200,6 +1369,9 @@ function AuditList({
   loading,
   emptyText,
   onOpen,
+  managing = false,
+  saving = false,
+  onDelete,
 }: {
   title: string
   audits: AuditRow[]
@@ -1207,6 +1379,9 @@ function AuditList({
   loading: boolean
   emptyText: string
   onOpen: (row: AuditRow) => void
+  managing?: boolean
+  saving?: boolean
+  onDelete?: (row: AuditRow) => void
 }) {
   return (
     <section style={listPanelStyle}>
@@ -1218,18 +1393,47 @@ function AuditList({
       {loading && <p style={emptyStyle}>讀取中...</p>}
       {!loading && audits.length === 0 && <p style={emptyStyle}>{emptyText}</p>}
 
-      {audits.map((row) => (
-        <button key={row.id} onClick={() => onOpen(row)} style={auditRowStyle}>
-          <span>
-            <strong>{row.biz_date}</strong>
-            <small>
-              {getWarehouseName(row.warehouse_code, warehouses)} /{" "}
-              {formatStatus(row.status)} / {formatDateTime(row.created_at)}
-            </small>
-          </span>
-          <span style={countPillStyle}>{row.item_count} 項</span>
-        </button>
-      ))}
+      {audits.map((row) => {
+        const expired = isAuditReviewExpired(row)
+
+        return (
+          <article key={row.id} style={auditRowStyle}>
+            <button
+              onClick={() => onOpen(row)}
+              style={{
+                ...auditOpenButtonStyle,
+                paddingRight: managing ? 68 : 14,
+              }}
+            >
+              <span>
+                <strong>{row.biz_date}</strong>
+                <small>
+                  {getWarehouseName(row.warehouse_code, warehouses)} /{" "}
+                  {formatStatus(row.status)} / {formatDateTime(row.created_at)}
+                </small>
+              </span>
+              <span style={auditPillsStyle}>
+                {expired && <span style={expiredPillStyle}>已逾期</span>}
+                <span style={countPillStyle}>{row.item_count} 項</span>
+              </span>
+            </button>
+
+            {managing && (
+              <button
+                onClick={() => onDelete?.(row)}
+                disabled={saving || row.status === "approved"}
+                style={{
+                  ...auditDeleteButtonStyle,
+                  opacity: saving || row.status === "approved" ? 0.46 : 1,
+                }}
+                aria-label="刪除盤點單"
+              >
+                -
+              </button>
+            )}
+          </article>
+        )
+      })}
     </section>
   )
 }
@@ -1483,6 +1687,18 @@ function addDays(value: string, days: number) {
   return formatDateValue(date)
 }
 
+function isAuditReviewExpired(audit: Pick<AuditRecord, "biz_date" | "status">) {
+  if (audit.status !== "submitted") return false
+
+  const auditDate = new Date(`${audit.biz_date}T12:00:00+08:00`)
+  const today = new Date(`${getBusinessDateValue()}T12:00:00+08:00`)
+  const diffDays = Math.floor(
+    (today.getTime() - auditDate.getTime()) / (24 * 60 * 60 * 1000)
+  )
+
+  return diffDays > AUDIT_REVIEW_LIMIT_DAYS
+}
+
 function formatDateValue(date: Date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -1498,6 +1714,16 @@ function getWarehouseName(value: string, warehouses: Warehouse[]) {
   if (value === "swap") return "夾換品"
   if (value === "onsite") return "現場"
   return value
+}
+
+function sortWarehouses(a: Warehouse, b: Warehouse) {
+  const aIndex = DEFAULT_WAREHOUSE_ORDER.indexOf(a.warehouse_code)
+  const bIndex = DEFAULT_WAREHOUSE_ORDER.indexOf(b.warehouse_code)
+
+  if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex
+  if (aIndex >= 0) return -1
+  if (bIndex >= 0) return 1
+  return a.warehouse_code.localeCompare(b.warehouse_code)
 }
 
 function formatStatus(value: string) {
@@ -1787,18 +2013,48 @@ const emptyStyle: CSSProperties = {
 }
 
 const auditRowStyle: CSSProperties = {
+  position: "relative",
+  width: "100%",
+  border: "1px solid rgba(148,163,184,0.16)",
+  borderRadius: 16,
+  background: "rgba(2,6,23,0.44)",
+  marginBottom: 10,
+  overflow: "hidden",
+}
+
+const auditOpenButtonStyle: CSSProperties = {
   width: "100%",
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   gap: 12,
-  border: "1px solid rgba(148,163,184,0.16)",
-  borderRadius: 16,
-  background: "rgba(2,6,23,0.44)",
+  border: "none",
+  background: "transparent",
   color: "#f8fafc",
   padding: "14px 14px",
   textAlign: "left",
-  marginBottom: 10,
+}
+
+const auditDeleteButtonStyle: CSSProperties = {
+  position: "absolute",
+  top: 8,
+  right: 8,
+  width: 34,
+  height: 34,
+  border: "1px solid rgba(248,113,113,0.28)",
+  borderRadius: 12,
+  background: "rgba(239,68,68,0.16)",
+  color: "#fca5a5",
+  fontSize: 24,
+  fontWeight: 950,
+  lineHeight: 1,
+}
+
+const auditPillsStyle: CSSProperties = {
+  flex: "0 0 auto",
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
 }
 
 const countPillStyle: CSSProperties = {
@@ -1806,6 +2062,17 @@ const countPillStyle: CSSProperties = {
   border: "1px solid rgba(96,165,250,0.32)",
   borderRadius: 999,
   color: "#bfdbfe",
+  padding: "6px 10px",
+  fontSize: 12,
+  fontWeight: 950,
+}
+
+const expiredPillStyle: CSSProperties = {
+  flex: "0 0 auto",
+  border: "1px solid rgba(251,191,36,0.32)",
+  borderRadius: 999,
+  color: "#fde68a",
+  background: "rgba(113,63,18,0.22)",
   padding: "6px 10px",
   fontSize: 12,
   fontWeight: 950,
@@ -1954,6 +2221,57 @@ const compareGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, 1fr)",
   gap: 8,
+}
+
+const categoryListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  marginTop: 4,
+}
+
+const categoryRowStyle: CSSProperties = {
+  width: "100%",
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 12,
+  border: "1px solid rgba(148,163,184,0.16)",
+  borderRadius: 16,
+  background: "rgba(2,6,23,0.44)",
+  color: "#f8fafc",
+  padding: 12,
+  textAlign: "left",
+}
+
+const categoryNameStyle: CSSProperties = {
+  display: "block",
+  color: "#f8fafc",
+  fontSize: 16,
+  fontWeight: 950,
+  marginBottom: 4,
+}
+
+const categoryCodeStyle: CSSProperties = {
+  display: "block",
+  color: "#94a3b8",
+  fontSize: 12,
+  fontWeight: 850,
+}
+
+const enabledPillStyle: CSSProperties = {
+  flex: "0 0 auto",
+  borderRadius: 999,
+  background: "rgba(34,197,94,0.16)",
+  color: "#86efac",
+  padding: "7px 10px",
+  fontSize: 12,
+  fontWeight: 950,
+}
+
+const disabledPillStyle: CSSProperties = {
+  ...enabledPillStyle,
+  background: "rgba(148,163,184,0.12)",
+  color: "#94a3b8",
 }
 
 const sheetOverlayStyle: CSSProperties = {
