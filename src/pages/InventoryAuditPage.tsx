@@ -1244,7 +1244,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
             </div>
 
             <p style={emptyStyle}>
-              這裡只控制新單是否可選，歷史交易與舊盤點資料不會被刪除。
+              點擊後即可「啟用/停用」，需新增其他類別請洽管理員
             </p>
 
             {message && <div style={messageStyle}>{message}</div>}
