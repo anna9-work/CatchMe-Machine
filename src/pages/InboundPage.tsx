@@ -26,7 +26,7 @@ type Warehouse = {
 
 const GROUP_CODE = "catch_0001"
 const INBOUND_SOURCE = "app_inbound"
-const ALLOWED_WAREHOUSES = ["main", "withdraw", "swap"]
+const DEFAULT_WAREHOUSE_ORDER = ["main", "withdraw", "swap", "onsite"]
 
 export default function InboundPage({ onBack }: Props) {
   const [bizDate] = useState(() => getTodayText())
@@ -78,26 +78,18 @@ export default function InboundPage({ onBack }: Props) {
     const { data, error: warehouseError } = await supabase
       .from("warehouse_kinds")
       .select("warehouse_code,warehouse_name")
-      .in("warehouse_code", ALLOWED_WAREHOUSES)
+      .eq("enabled", true)
       .order("warehouse_code", { ascending: true })
 
     if (warehouseError) {
       console.error(warehouseError)
-      setWarehouses([
-        { warehouse_code: "main", warehouse_name: "總倉" },
-        { warehouse_code: "withdraw", warehouse_name: "撤台" },
-        { warehouse_code: "swap", warehouse_name: "夾換品" },
-      ])
+      setWarehouses([{ warehouse_code: "main", warehouse_name: "總倉" }])
       return
     }
 
-    const rows = ((data ?? []) as Warehouse[]).sort((a, b) => {
-      return (
-        ALLOWED_WAREHOUSES.indexOf(a.warehouse_code) -
-        ALLOWED_WAREHOUSES.indexOf(b.warehouse_code)
-      )
-    })
+    const rows = ((data ?? []) as Warehouse[]).sort(sortWarehouses)
     setWarehouses(rows)
+
     if (rows.length > 0 && !rows.some((row) => row.warehouse_code === warehouse)) {
       setWarehouse(rows[0].warehouse_code)
     }
@@ -498,6 +490,16 @@ function formatDisplayDate() {
     day: "2-digit",
     weekday: "short",
   }).format(new Date())
+}
+
+function sortWarehouses(a: Warehouse, b: Warehouse) {
+  const aIndex = DEFAULT_WAREHOUSE_ORDER.indexOf(a.warehouse_code)
+  const bIndex = DEFAULT_WAREHOUSE_ORDER.indexOf(b.warehouse_code)
+
+  if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex
+  if (aIndex >= 0) return -1
+  if (bIndex >= 0) return 1
+  return a.warehouse_code.localeCompare(b.warehouse_code)
 }
 
 const pageStyle: CSSProperties = {
