@@ -3,7 +3,6 @@ import { supabase } from "../lib/supabase"
 
 type Props = {
   onBack: () => void
-  onOpenCorrection: (ledgerId: number) => void
 }
 
 type TypeFilter = "all" | "inbound" | "outbound" | "voided"
@@ -50,7 +49,7 @@ type FollowingMap = Record<number, boolean>
 const GROUP_CODE = "catch_0001"
 const VOIDABLE_SOURCES = ["app_inbound", "APP_INBOUND", "line_outbound", "LINE_OUTBOUND"]
 
-export default function LineBotPage({ onBack, onOpenCorrection }: Props) {
+export default function LineBotPage({ onBack }: Props) {
   const [businessDate, setBusinessDate] = useState(() => getBusinessDateText())
   const [lockBusinessDate, setLockBusinessDate] = useState<string | null>(null)
   const [minBusinessDate, setMinBusinessDate] = useState("")
@@ -475,13 +474,9 @@ export default function LineBotPage({ onBack, onOpenCorrection }: Props) {
                       <span style={qtyLabelStyle}>散</span>
                       <strong style={qtyValueStyle}>{formatQty(qtyPiece)}</strong>
                     </div>
-                    <button
-                      onClick={() => onOpenCorrection(row.id)}
-                      style={idButtonStyle}
-                      aria-label={`開啟交易 ${row.id} 特殊校正`}
-                    >
+                    <span style={idButtonStyle}>
                       #{row.id}
-                    </button>
+                    </span>
                   </div>
 
                   {row.voided_by_id && (
