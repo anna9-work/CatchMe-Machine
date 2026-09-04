@@ -39,6 +39,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
   const [items, setItems] = useState<CloseItem[]>([])
   const [loading, setLoading] = useState(false)
   const [closingAudit, setClosingAudit] = useState(false)
+  const [snapshotLocked, setSnapshotLocked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -95,14 +96,17 @@ export default function MachineAuditClosePage({ onBack }: Props) {
   }, [items])
 
   useEffect(() => {
+    setSnapshotLocked(false)
     loadAuditRows()
   }, [bizDate])
 
-  async function loadAuditRows() {
+  async function loadAuditRows(options?: { keepStatus?: boolean }) {
     try {
       setLoading(true)
-      setError("")
-      setMessage("")
+      if (!options?.keepStatus) {
+        setError("")
+        setMessage("")
+      }
 
       const { data, error } = await supabase.rpc("machine_audit_sheet_rows_v1", {
         p_group: GROUP_CODE,
@@ -164,8 +168,9 @@ export default function MachineAuditClosePage({ onBack }: Props) {
 
       if (error) throw error
 
-      setMessage(`${bizDate} 機台盤點資料已鎖定，可以確認數量後送出結算`)
-      await loadAuditRows()
+      setSnapshotLocked(true)
+      await loadAuditRows({ keepStatus: true })
+      setMessage(`${bizDate} 機台盤點來源已鎖定，請填入盤點結果後送出結算`)
     } catch (err) {
       console.error(err)
       setError(getErrorMessage(err, "鎖定機台盤點資料失敗"))
@@ -195,6 +200,11 @@ export default function MachineAuditClosePage({ onBack }: Props) {
   }
 
   async function submitClose() {
+    if (!snapshotLocked) {
+      setError("請先鎖定盤點來源")
+      return
+    }
+
     if (items.length === 0) {
       setError("沒有可以結算的機台盤點數據")
       return
@@ -301,7 +311,11 @@ export default function MachineAuditClosePage({ onBack }: Props) {
           <div style={subTitleStyle}>機台生命週期</div>
         </div>
 
-        <button onClick={loadAuditRows} disabled={loading} style={refreshButtonStyle}>
+        <button
+          onClick={() => loadAuditRows()}
+          disabled={loading}
+          style={refreshButtonStyle}
+        >
           更新
         </button>
       </div>
@@ -319,6 +333,21 @@ export default function MachineAuditClosePage({ onBack }: Props) {
             style={inputStyle}
           />
         </label>
+
+        <button
+          onClick={closeAuditSnapshot}
+          disabled={closingAudit || loading || saving}
+          style={{
+            ...lockButtonStyle,
+            opacity: closingAudit || loading || saving ? 0.7 : 1,
+          }}
+        >
+          {snapshotLocked
+            ? "已鎖定盤點來源"
+            : closingAudit
+              ? "鎖定中..."
+              : "鎖定盤點來源"}
+        </button>
       </section>
 
       {!loading && (
@@ -398,6 +427,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                           min={0}
                           placeholder={formatQty(item.audit_inner_qty)}
                           value={item.corrected_inner_qty}
+                          disabled={!snapshotLocked}
                           onChange={(event) =>
                             updateItemQty(
                               item.key,
@@ -417,6 +447,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                           min={0}
                           placeholder={formatQty(item.outside_box)}
                           value={item.corrected_ground_box}
+                          disabled={!snapshotLocked}
                           onChange={(event) =>
                             updateItemQty(
                               item.key,
@@ -436,6 +467,7 @@ export default function MachineAuditClosePage({ onBack }: Props) {
                           min={0}
                           placeholder={formatQty(item.outside_piece)}
                           value={item.corrected_ground_piece}
+                          disabled={!snapshotLocked}
                           onChange={(event) =>
                             updateItemQty(
                               item.key,
@@ -458,22 +490,11 @@ export default function MachineAuditClosePage({ onBack }: Props) {
       {items.length > 0 && (
         <div style={bottomBarStyle}>
           <button
-            onClick={closeAuditSnapshot}
-            disabled={closingAudit || loading || saving}
-            style={{
-              ...bottomSecondaryButtonStyle,
-              opacity: closingAudit || loading || saving ? 0.7 : 1,
-            }}
-          >
-            {closingAudit ? "鎖定中" : "鎖定"}
-          </button>
-
-          <button
             onClick={submitClose}
-            disabled={saving || loading}
+            disabled={saving || loading || !snapshotLocked}
             style={{
               ...submitButtonStyle,
-              opacity: saving || loading ? 0.7 : 1,
+              opacity: saving || loading || !snapshotLocked ? 0.55 : 1,
             }}
           >
             {saving ? "結算中..." : "送出結算"}
@@ -657,28 +678,48 @@ const panelStyle: CSSProperties = {
   borderRadius: 18,
   padding: 12,
   display: "grid",
+  gap: 10,
   boxSizing: "border-box",
+  overflow: "hidden",
+  minWidth: 0,
 }
 
 const inputStyle: CSSProperties = {
   width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
   minHeight: 46,
   borderRadius: 14,
   border: "1px solid #334155",
   background: "#0b1220",
   color: "#fff",
   fontSize: 16,
-  padding: "0 13px",
+  padding: "0 12px",
   boxSizing: "border-box",
   outline: "none",
+  display: "block",
 }
 
 const fieldStyle: CSSProperties = {
   display: "grid",
   gap: 6,
+  minWidth: 0,
   color: "#cbd5e1",
   fontSize: 13,
   fontWeight: 850,
+}
+
+const lockButtonStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 46,
+  border: "1px solid rgba(96, 165, 250, 0.35)",
+  borderRadius: 14,
+  background: "rgba(96, 165, 250, 0.12)",
+  color: "#bfdbfe",
+  fontSize: 15,
+  fontWeight: 900,
+  cursor: "pointer",
+  boxSizing: "border-box",
 }
 
 const machineSummaryStyle: CSSProperties = {
@@ -869,20 +910,8 @@ const bottomBarStyle: CSSProperties = {
   background: "linear-gradient(180deg, rgba(5,9,19,0), #050913 24%)",
   boxSizing: "border-box",
   display: "grid",
-  gridTemplateColumns: "88px minmax(0, 1fr)",
+  gridTemplateColumns: "minmax(0, 1fr)",
   gap: 10,
-}
-
-const bottomSecondaryButtonStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 54,
-  border: "1px solid rgba(96, 165, 250, 0.35)",
-  borderRadius: 18,
-  background: "rgba(96, 165, 250, 0.12)",
-  color: "#bfdbfe",
-  fontSize: 15,
-  fontWeight: 900,
-  cursor: "pointer",
 }
 
 const submitButtonStyle: CSSProperties = {
