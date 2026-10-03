@@ -1509,9 +1509,11 @@ function ReviewCard({ row }: { row: ReviewRow }) {
   return (
     <div style={reviewCardStyle}>
       <div style={reviewTopStyle}>
-        <div>
-          <strong style={reviewSkuStyle}>{row.product_sku}</strong>
+        <div style={reviewNameBlockStyle}>
           <div style={reviewNameStyle}>{row.product_name}</div>
+        </div>
+        <div style={reviewSkuBlockStyle}>
+          <strong style={reviewSkuStyle}>{row.product_sku}</strong>
           <small style={reviewUnitStyle}>箱入數：{row.units_per_box}</small>
         </div>
       </div>
@@ -2088,67 +2090,84 @@ const deleteButtonStyle: CSSProperties = {
 
 const reviewCardStyle: CSSProperties = {
   border: "1px solid rgba(148,163,184,0.16)",
-  borderRadius: 18,
+  borderRadius: 14,
   background: "rgba(2,6,23,0.44)",
-  padding: 14,
-  marginBottom: 12,
+  padding: 10,
+  marginBottom: 8,
 }
 
 const reviewTopStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  gap: 12,
-  marginBottom: 12,
+  alignItems: "flex-start",
+  gap: 10,
+  marginBottom: 8,
+}
+
+const reviewNameBlockStyle: CSSProperties = {
+  minWidth: 0,
+  flex: "1 1 auto",
+}
+
+const reviewSkuBlockStyle: CSSProperties = {
+  flex: "0 0 auto",
+  textAlign: "right",
+  maxWidth: "42%",
 }
 
 const reviewSkuStyle: CSSProperties = {
   display: "block",
   color: "#60a5fa",
-  fontSize: 18,
+  fontSize: 15,
   fontWeight: 950,
-  marginBottom: 6,
+  marginBottom: 3,
+  overflowWrap: "anywhere",
 }
 
 const reviewNameStyle: CSSProperties = {
-  color: "#93c5fd",
+  color: "#f8fafc",
   fontSize: 14,
   fontWeight: 900,
   lineHeight: 1.35,
+  overflowWrap: "anywhere",
 }
 
 const reviewUnitStyle: CSSProperties = {
   display: "block",
   color: "#bfdbfe",
-  fontSize: 12,
+  fontSize: 11,
   fontWeight: 850,
-  marginTop: 6,
+  marginTop: 0,
 }
 
 const auditCountGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 8,
+  gap: 6,
 }
 
 const auditCountCellStyle: CSSProperties = {
   border: "1px solid rgba(96,165,250,0.16)",
-  borderRadius: 14,
+  borderRadius: 12,
   background: "rgba(15,23,42,0.72)",
-  padding: "12px 10px",
+  padding: "7px 9px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
 }
 
 const auditCountLabelStyle: CSSProperties = {
   display: "block",
   color: "#94a3b8",
-  fontSize: 12,
+  fontSize: 11,
   fontWeight: 850,
-  marginBottom: 5,
 }
 
 const auditCountValueStyle: CSSProperties = {
   display: "block",
   color: "#f8fafc",
-  fontSize: 20,
+  fontSize: 16,
   fontWeight: 950,
 }
 
