@@ -755,7 +755,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
       const nextMissingCostRows = await findMissingCostRows()
       if (nextMissingCostRows.length > 0) {
         setMissingCostRows(nextMissingCostRows)
-        setError("有品項缺少入庫單價，補完單價後再執行盤點。")
+        setError(formatMissingCostMessage(nextMissingCostRows))
         return
       }
 
@@ -773,7 +773,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
       await loadAudits("submitted")
     } catch (err) {
       console.error(err)
-      const message = getErrorMessage(err, "審核執行失敗")
+      const message = getRawErrorMessage(err, "審核執行失敗")
       const parsedSku = parseMissingCostSku(message)
       if (parsedSku) {
         const knownRow =
@@ -785,7 +785,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
             product_name: knownRow?.product_name ?? parsedSku,
           },
         ])
-        setError("有品項缺少入庫單價，補完單價後再執行盤點。")
+        setError(formatMissingCostMessage([{ product_sku: parsedSku }]))
       } else {
         setError(message)
       }
@@ -1005,7 +1005,7 @@ export default function InventoryAuditPage({ onBack }: Props) {
             {missingCostRows.map((row) => (
               <div key={row.product_sku} style={missingCostRowStyle}>
                 <span>{row.product_name}</span>
-                <strong>{row.product_sku}</strong>
+                <strong>#{row.product_sku} 請補入單價</strong>
               </div>
             ))}
           </div>
@@ -1756,6 +1756,12 @@ function formatDateTime(value: string) {
 }
 
 function getErrorMessage(err: unknown, fallback: string) {
+  const message = getRawErrorMessage(err, fallback)
+  const sku = parseMissingCostSku(message)
+  return sku ? formatMissingCostMessage([{ product_sku: sku }]) : message
+}
+
+function getRawErrorMessage(err: unknown, fallback: string) {
   if (err instanceof Error) return err.message
   if (typeof err === "object" && err !== null && "message" in err) {
     const message = (err as { message?: unknown }).message
@@ -1767,6 +1773,10 @@ function getErrorMessage(err: unknown, fallback: string) {
 function parseMissingCostSku(message: string) {
   const match = message.match(/INVENTORY_AUDIT_MISSING_COST:[\s\S]*?sku=([^\s]+)/i)
   return match?.[1]?.trim().toLowerCase() ?? null
+}
+
+function formatMissingCostMessage(rows: Pick<MissingCostRow, "product_sku">[]) {
+  return `${rows.map((row) => `#${row.product_sku}`).join("、")} 請補入單價，補完後再執行盤點。`
 }
 
 const pageStyle: CSSProperties = {
